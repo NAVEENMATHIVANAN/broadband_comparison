@@ -160,7 +160,8 @@ def save_or_update_plan(plan):
         connection.close()
 
 
-def get_plans(city=None, max_price=None):
+
+def get_plans(city=None, max_price=None, pincode=None):
     query = "SELECT * FROM plans WHERE 1 = 1"
     parameters = []
 
@@ -168,23 +169,22 @@ def get_plans(city=None, max_price=None):
         query += " AND LOWER(city) = LOWER(?)"
         parameters.append(city.strip())
 
+    if pincode:
+        query += " AND pincode = ?"
+        parameters.append(pincode.strip())
+
     if max_price is not None:
         query += " AND price <= ?"
         parameters.append(max_price)
 
     query += " ORDER BY price ASC"
 
-    connection = get_connection()
-
-    try:
+    with get_connection() as connection:
         rows = connection.execute(
             query, parameters
         ).fetchall()
 
-        return [dict(row) for row in rows]
-
-    finally:
-        connection.close()
+    return [dict(row) for row in rows]
 
 
 if __name__ == "__main__":

@@ -1,0 +1,298 @@
+
+:root {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #172b42;
+    background: #f4f7fb;
+    font-synthesis: none;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px max(5%, calc((100% - 1200px) / 2));
+    background: #10243a;
+    color: white;
+}
+
+.brand {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.brand span {
+    margin-right: 8px;
+    color: #70dfc0;
+}
+
+.topbar a {
+    color: white;
+    text-decoration: none;
+}
+
+.container {
+    width: min(1200px, 92%);
+    margin: 0 auto;
+}
+
+.hero {
+    padding: 52px 0 32px;
+}
+
+.eyebrow {
+    color: #147d70;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+}
+
+.hero h1 {
+    margin: 8px 0 12px;
+    font-size: clamp(32px, 5vw, 54px);
+    line-height: 1.12;
+}
+
+.hero h1 span {
+    color: #168b7b;
+}
+
+.hero > p:last-child {
+    max-width: 600px;
+    color: #627185;
+}
+
+.panel {
+    padding: 22px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 4px 18px rgba(20, 40, 70, 0.04);
+}
+
+.filters {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    align-items: end;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.field label {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+input,
+select,
+button {
+    font: inherit;
+}
+
+.field input,
+.field select {
+    width: 100%;
+    min-width: 0;
+    padding: 11px;
+    border: 1px solid #d4dce7;
+    border-radius: 8px;
+    background: white;
+    color: #172b42;
+}
+
+button {
+    min-height: 42px;
+    padding: 10px 16px;
+    border: 1px solid #176f66;
+    border-radius: 8px;
+    background: #176f66;
+    color: white;
+    cursor: pointer;
+    font-weight: 700;
+}
+
+button:hover {
+    background: #10584f;
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+button.secondary {
+    background: white;
+    color: #176f66;
+}
+
+.results-section {
+    margin-top: 36px;
+}
+
+.section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.section-heading h2 {
+    margin: 0;
+    font-size: 23px;
+}
+
+.muted {
+    color: #69788b;
+}
+
+.small {
+    font-size: 12px;
+}
+
+.status {
+    color: #8b4d13;
+    font-size: 14px;
+}
+
+.table-wrap {
+    overflow-x: auto;
+    padding: 0;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 14px;
+}
+
+th,
+td {
+    padding: 15px 12px;
+    border-bottom: 1px solid #e8edf3;
+    vertical-align: top;
+}
+
+th {
+    background: #f7f9fc;
+    color: #526278;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+tbody tr:hover {
+    background: #f9fbfd;
+}
+
+td a {
+    color: #087b70;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+td input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    accent-color: #176f66;
+}
+
+.comparison {
+    margin-top: 24px;
+}
+
+.comparison-grid,
+.offers-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.compare-card,
+.offer-card {
+    padding: 18px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow-wrap: anywhere;
+}
+
+.compare-card h3,
+.offer-card h3 {
+    margin-top: 0;
+}
+
+.disclaimer {
+    margin: 36px 0;
+    padding: 16px;
+    border-left: 3px solid #168b7b;
+    background: #eaf5f3;
+    color: #425568;
+    font-size: 13px;
+}
+
+footer {
+    padding: 24px;
+    background: #10243a;
+    color: #d5e3f0;
+    text-align: center;
+    font-size: 13px;
+}
+
+@media (max-width: 900px) {
+    .filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .comparison-grid,
+    .offers-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .hero {
+        padding-top: 32px;
+    }
+
+    .filters {
+        grid-template-columns: 1fr;
+        padding: 16px;
+    }
+
+    .section-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .comparison-grid,
+    .offers-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .panel {
+        padding: 16px;
+    }
+
+    .table-wrap {
+        padding: 0;
+    }
+}

@@ -1,152 +1,125 @@
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
 
 from database import get_plans, get_connection, init_db
 from scraper import run_scraper
 
 
+BASE_DIR = Path(__file__).resolve().parent
+
 app = FastAPI(
     title="Broadband Price Comparison API",
-    description=(
-        "Compare broadband plans and offers "
-        "from Indian internet service providers."
-    ),
-    version="1.0.0",
+    description="Compare broadband plans in India.",
+    version="1.1.0",
+)
+
+app.mount(
+    "/static",
+    StaticFiles(directory=str(BASE_DIR / "static")),
+    name="static",
+)
+
+templates = Jinja2Templates(
+    directory=str(BASE_DIR / "templates")
 )
 
 
 @app.on_event("startup")
 def startup():
-    """Initialize the database when the API starts."""
     init_db()
 
 
 @app.get("/", response_class=HTMLResponse)
-def home():
-    """Temporary landing page until the frontend is built."""
-    return """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Broadband Comparison API</title>
-    </head>
-    <body>
-        <h1>Broadband Price Comparison</h1>
-        <p>The backend is running successfully.</p>
-        <p><a href="/docs">Open API documentation</a></p>
-        <p><a href="/plans">View stored plans</a></p>
-    </body>
-    </html>
-    """
+def home(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"title": "Broadband Compare India"},
+    )
 
 
 @app.get("/plans")
 def list_plans(
-    city: str | None = Query(default=None, min_length=1),
+    city: str | None = Query(default=None),
+    pincode: str | None = Query(default=None),
     max_price: float | None = Query(default=None, gt=0),
 ):
-    """Return broadband plans with optional filters."""
+    city = city.strip() if city else None
+    pincode = pincode.strip() if pincode else None
 
-    if city is not None:
-        city = city.strip()
+    if city == "":
+        raise HTTPException(400, "City cannot be empty.")
 
-        if not city:
-            raise HTTPException(
-                status_code=400,
-                detail="City cannot be empty.",
-            )
-
-    try:
-        plans = get_plans(
-            city=city,
-            max_price=max_price,
-        )
-        return {
-            "count": len(plans),
-            "filters": {
-                "city": city,
-                "max_price": max_price,
-            },
-            "plans": plans,
-        }
-
-    except Exception as error:
+    if pincode and (
+        not pincode.isdigit() or len(pincode) != 6
+    ):
         raise HTTPException(
-            status_code=500,
-            detail="Could not retrieve broadband plans.",
-        ) from error
+            400, "PIN code must contain exactly 6 digits."
+        )
+
+    plans = get_plans(
+        city=city,
+        max_price=max_price,
+        pincode=pincode,
+    )
+
+    return {
+        "count": len(plans),
+        "filters": {
+            "city": city,
+            "pincode": pincode,
+            "max_price": max_price,
+        },
+        "plans": plans,
+    }
 
 
 @app.get("/offers")
 def list_offers(
-    city: str | None = Query(default=None, min_length=1),
+    city: str | None = Query(default=None),
 ):
-    """Return recorded promotional offers."""
-
-    if city is not None:
-        city = city.strip()
-
-        if not city:
-            raise HTTPException(
-                status_code=400,
-                detail="City cannot be empty.",
-            )
-
     query = """
-        SELECT *
-        FROM plans
+        SELECT * FROM plans
         WHERE offer IS NOT NULL
           AND TRIM(offer) != ''
     """
     parameters = []
 
-    if city:
+    if city and city.strip():
         query += " AND LOWER(city) = LOWER(?)"
-        parameters.append(city)
+        parameters.append(city.strip())
 
     query += " ORDER BY price ASC"
 
-    connection = get_connection()
-
-    try:
+    with get_connection() as connection:
         rows = connection.execute(
             query, parameters
         ).fetchall()
 
-        offers = [dict(row) for row in rows]
+    offers = [dict(row) for row in rows]
 
-        return {
-            "count": len(offers),
-            "city": city,
-            "offers": offers,
-        }
-
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail="Could not retrieve broadband offers.",
-        ) from error
-
-    finally:
-        connection.close()
+    return {
+        "count": len(offers),
+        "city": city,
+        "offers": offers,
+    }
 
 
 @app.post("/scrape")
 def scrape_plans():
-    """Manually trigger the existing scraper."""
-
     try:
-        processed = run_scraper()
-
+        count = run_scraper()
         return {
             "message": "Scraping process completed.",
-            "processed_count": processed,
+            "processed_count": count,
         }
-
     except Exception as error:
         raise HTTPException(
-            status_code=500,
-            detail="The scraping process failed.",
+            500, "The scraping process failed."
         ) from error

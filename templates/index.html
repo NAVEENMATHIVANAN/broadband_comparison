@@ -1,0 +1,408 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand"><span>◉</span> Broadband Compare India</div>
+    <a href="/docs" target="_blank">API Docs ↗</a>
+</header>
+
+<main class="container">
+    <section class="hero">
+        <p class="eyebrow">INDIA BROADBAND GUIDE</p>
+        <h1>Better internet.<br><span>Smarter comparison.</span></h1>
+        <p>Explore available broadband plans, compare speeds,
+           and find an option within your monthly budget.</p>
+    </section>
+
+    <section class="filters panel">
+        <div class="field">
+            <label for="city">City</label>
+            <select id="city">
+                <option value="">All cities</option>
+                <option>Chennai</option>
+                <option>Coimbatore</option>
+                <option>Bengaluru</option>
+                <option>Hyderabad</option>
+            </select>
+        </div>
+
+        <div class="field">
+            <label for="pincode">PIN code (optional)</label>
+            <input id="pincode" type="text" inputmode="numeric"
+                   maxlength="6" placeholder="e.g. 600001">
+        </div>
+
+        <div class="field">
+            <label for="budget">Maximum monthly budget (₹)</label>
+            <input id="budget" type="number" min="1"
+                   placeholder="e.g. 1000">
+        </div>
+
+        <div class="field">
+            <label for="sort">Sort results</label>
+            <select id="sort">
+                <option value="price">Lowest price</option>
+                <option value="speed">Highest speed</option>
+            </select>
+        </div>
+
+        <button id="searchBtn" type="button">Find plans</button>
+        <button id="resetBtn" class="secondary" type="button">Reset</button>
+    </section>
+
+    <section class="results-section">
+        <div class="section-heading">
+            <div>
+                <h2>Broadband plans</h2>
+                <p id="resultCount" class="muted">Loading plans...</p>
+            </div>
+            <button id="compareBtn" type="button" disabled>
+                Compare selected (0/3)
+            </button>
+        </div>
+
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+
+        <div class="table-wrap panel">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Select</th>
+                        <th>Provider / Plan</th>
+                        <th>Speed</th>
+                        <th>Monthly price</th>
+                        <th>Offer</th>
+                        <th>Verified</th>
+                        <th>Source</th>
+                    </tr>
+                </thead>
+                <tbody id="plansBody">
+                    <tr><td colspan="7">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="comparison" class="panel comparison" hidden>
+        <div class="section-heading">
+            <h2>Side-by-side comparison</h2>
+            <button id="clearCompare" class="secondary" type="button">
+                Clear selection
+            </button>
+        </div>
+        <div id="comparisonContent" class="comparison-grid"></div>
+    </section>
+
+    <section class="results-section">
+        <div class="section-heading">
+            <h2>Recorded offers</h2>
+        </div>
+        <div id="offersList" class="offers-grid">
+            <p class="muted">Loading offers...</p>
+        </div>
+    </section>
+
+    <p class="disclaimer">
+        Prices and availability depend on the provider and service area.
+        Verify plan details, taxes, installation fees and promotional
+        expiry dates with the ISP before subscribing.
+    </p>
+</main>
+
+<footer>
+    Broadband Compare India · Learning project
+</footer>
+
+<script>
+const plansBody = document.getElementById("plansBody");
+const resultCount = document.getElementById("resultCount");
+const statusBox = document.getElementById("status");
+const compareBtn = document.getElementById("compareBtn");
+const comparison = document.getElementById("comparison");
+const comparisonContent = document.getElementById("comparisonContent");
+const offersList = document.getElementById("offersList");
+
+let currentPlans = [];
+let selectedIds = new Set();
+
+function money(value) {
+    if (value === null || value === undefined || value === "") {
+        return "Not published";
+    }
+    return "₹" + Number(value).toLocaleString("en-IN", {
+        maximumFractionDigits: 2
+    });
+}
+
+function dateText(value) {
+    if (!value) return "Unknown";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Unknown";
+    return date.toLocaleString("en-IN");
+}
+
+function safeText(value) {
+    return value === null || value === undefined || value === ""
+        ? "Not published" : String(value);
+}
+
+async function fetchJSON(url) {
+    const response = await fetch(url);
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "Request failed.");
+    }
+    return response.json();
+}
+
+function buildPlansURL() {
+    const params = new URLSearchParams();
+    const city = document.getElementById("city").value;
+    const pincode = document.getElementById("pincode").value.trim();
+    const budget = document.getElementById("budget").value;
+
+    if (city) params.set("city", city);
+    if (pincode) params.set("pincode", pincode);
+    if (budget) params.set("max_price", budget);
+
+    return "/plans?" + params.toString();
+}
+
+async function loadPlans() {
+    statusBox.textContent = "";
+    plansBody.innerHTML = "<tr><td colspan='7'>Loading...</td></tr>";
+
+    try {
+        const data = await fetchJSON(buildPlansURL());
+        currentPlans = data.plans || [];
+
+        const sort = document.getElementById("sort").value;
+        currentPlans.sort((a, b) => {
+            if (sort === "speed") {
+                return (b.speed_mbps ?? -1) - (a.speed_mbps ?? -1);
+            }
+            return (a.price ?? Infinity) - (b.price ?? Infinity);
+        });
+
+        const validIds = new Set(currentPlans.map(p => String(p.id)));
+        selectedIds = new Set(
+            [...selectedIds].filter(id => validIds.has(id))
+        );
+
+        renderPlans();
+        renderComparison();
+        resultCount.textContent = `${currentPlans.length} plan(s) found`;
+
+        if (!currentPlans.length) {
+            statusBox.textContent =
+                "No matching verified plans are stored for these filters yet.";
+        }
+    } catch (error) {
+        currentPlans = [];
+        renderPlans();
+        resultCount.textContent = "Unable to load plans";
+        statusBox.textContent = error.message;
+    }
+}
+
+function renderPlans() {
+    if (!currentPlans.length) {
+        plansBody.innerHTML =
+            "<tr><td colspan='7'>No plans available for this search.</td></tr>";
+        updateCompareButton();
+        return;
+    }
+
+    plansBody.replaceChildren();
+
+    for (const plan of currentPlans) {
+        const tr = document.createElement("tr");
+
+        const selectCell = document.createElement("td");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = selectedIds.has(String(plan.id));
+        checkbox.setAttribute("aria-label", "Select " + safeText(plan.plan_name));
+        checkbox.addEventListener("change", () => {
+            const id = String(plan.id);
+
+            if (checkbox.checked && selectedIds.size >= 3) {
+                checkbox.checked = false;
+                statusBox.textContent = "You can compare up to three plans.";
+                return;
+            }
+
+            if (checkbox.checked) selectedIds.add(id);
+            else selectedIds.delete(id);
+
+            renderComparison();
+            updateCompareButton();
+        });
+        selectCell.append(checkbox);
+
+        const providerCell = document.createElement("td");
+        const provider = document.createElement("strong");
+        provider.textContent = safeText(plan.provider);
+        const name = document.createElement("div");
+        name.className = "muted small";
+        name.textContent = safeText(plan.plan_name);
+        providerCell.append(provider, name);
+
+        const speedCell = document.createElement("td");
+        speedCell.textContent = plan.speed_mbps
+            ? `${plan.speed_mbps} Mbps` : "Not published";
+
+        const priceCell = document.createElement("td");
+        priceCell.textContent = money(plan.price);
+
+        const offerCell = document.createElement("td");
+        offerCell.textContent = safeText(plan.offer);
+        if (plan.offer_price !== null && plan.offer_price !== undefined) {
+            offerCell.append(document.createElement("br"));
+            const promo = document.createElement("strong");
+            promo.textContent = "Offer: " + money(plan.offer_price);
+            offerCell.append(promo);
+        }
+        if (plan.offer_expiry) {
+            offerCell.append(document.createElement("br"));
+            offerCell.append(
+                document.createTextNode("Expires: " + safeText(plan.offer_expiry))
+            );
+        }
+
+        const updatedCell = document.createElement("td");
+        updatedCell.textContent = dateText(plan.last_updated);
+
+        const sourceCell = document.createElement("td");
+        const link = document.createElement("a");
+        link.href = plan.source_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Visit ISP ↗";
+        sourceCell.append(link);
+
+        tr.append(
+            selectCell, providerCell, speedCell, priceCell,
+            offerCell, updatedCell, sourceCell
+        );
+        plansBody.append(tr);
+    }
+
+    updateCompareButton();
+}
+
+function updateCompareButton() {
+    compareBtn.textContent = `Compare selected (${selectedIds.size}/3)`;
+    compareBtn.disabled = selectedIds.size < 2;
+}
+
+function renderComparison() {
+    const chosen = currentPlans.filter(
+        plan => selectedIds.has(String(plan.id))
+    );
+
+    comparison.hidden = chosen.length < 2;
+    comparisonContent.replaceChildren();
+
+    for (const plan of chosen) {
+        const card = document.createElement("article");
+        card.className = "compare-card";
+
+        const title = document.createElement("h3");
+        title.textContent = safeText(plan.provider);
+        const name = document.createElement("p");
+        name.textContent = safeText(plan.plan_name);
+        const speed = document.createElement("p");
+        speed.textContent = "Speed: " +
+            (plan.speed_mbps ? `${plan.speed_mbps} Mbps` : "Not published");
+        const price = document.createElement("p");
+        price.textContent = "Regular price: " + money(plan.price);
+        const offer = document.createElement("p");
+        offer.textContent = "Offer price: " + money(plan.offer_price);
+
+        card.append(title, name, speed, price, offer);
+        comparisonContent.append(card);
+    }
+}
+
+async function loadOffers() {
+    const city = document.getElementById("city").value;
+    const params = new URLSearchParams();
+    if (city) params.set("city", city);
+
+    try {
+        const data = await fetchJSON("/offers?" + params.toString());
+        offersList.replaceChildren();
+
+        if (!data.offers.length) {
+            offersList.textContent = "No recorded offers for this region.";
+            return;
+        }
+
+        for (const plan of data.offers) {
+            const card = document.createElement("article");
+            card.className = "offer-card";
+
+            const heading = document.createElement("h3");
+            heading.textContent = safeText(plan.provider);
+            const description = document.createElement("p");
+            description.textContent = safeText(plan.offer);
+            const price = document.createElement("p");
+            price.textContent = "Regular price: " + money(plan.price);
+            const updated = document.createElement("p");
+            updated.className = "muted small";
+            updated.textContent = "Verified: " + dateText(plan.last_updated);
+
+            card.append(heading, description, price, updated);
+            offersList.append(card);
+        }
+    } catch (error) {
+        offersList.textContent = "Could not load offers: " + error.message;
+    }
+}
+
+document.getElementById("searchBtn").addEventListener("click", () => {
+    const pincode = document.getElementById("pincode").value.trim();
+
+    if (pincode && !/^\d{6}$/.test(pincode)) {
+        statusBox.textContent = "Enter a valid six-digit PIN code.";
+        return;
+    }
+
+    loadPlans();
+    loadOffers();
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+    document.getElementById("city").value = "";
+    document.getElementById("pincode").value = "";
+    document.getElementById("budget").value = "";
+    document.getElementById("sort").value = "price";
+    selectedIds.clear();
+    loadPlans();
+    loadOffers();
+});
+
+document.getElementById("sort").addEventListener("change", loadPlans);
+compareBtn.addEventListener("click", () => {
+    comparison.hidden = false;
+    comparison.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+document.getElementById("clearCompare").addEventListener("click", () => {
+    selectedIds.clear();
+    renderPlans();
+    renderComparison();
+});
+
+loadPlans();
+loadOffers();
+</script>
+</body>
+</html>
