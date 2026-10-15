@@ -201,9 +201,18 @@ async function loadPlans() {
         resultCount.textContent = `${currentPlans.length} plan(s) found`;
 
         if (!currentPlans.length) {
-            statusBox.textContent =
-                "No matching verified plans are stored for these filters yet.";
-        }
+    const city = document.getElementById("city").value;
+    const pincode = document.getElementById("pincode").value.trim();
+
+    if (city || pincode) {
+        statusBox.textContent =
+            "No plans match this region. Regional availability may not " +
+            "have been verified yet. Try another region or clear the filters.";
+    } else {
+        statusBox.textContent =
+            "No plans are currently stored. Check the scraper and database.";
+    }
+}
     } catch (error) {
         currentPlans = [];
         renderPlans();

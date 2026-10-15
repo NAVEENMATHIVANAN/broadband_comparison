@@ -123,3 +123,46 @@ def scrape_plans():
         raise HTTPException(
             500, "The scraping process failed."
         ) from error
+
+
+
+@app.get("/regions")
+def list_regions():
+    """List cities and PIN codes actually recorded in the database."""
+
+    with get_connection() as connection:
+        rows = connection.execute("""
+            SELECT DISTINCT city
+            FROM plans
+            WHERE city IS NOT NULL
+              AND TRIM(city) != ''
+            ORDER BY city
+        """).fetchall()
+
+        pincode_rows = connection.execute("""
+            SELECT DISTINCT pincode
+            FROM plans
+            WHERE pincode IS NOT NULL
+              AND TRIM(pincode) != ''
+            ORDER BY pincode
+        """).fetchall()
+
+        total = connection.execute(
+            "SELECT COUNT(*) FROM plans"
+        ).fetchone()[0]
+
+        regional_count = connection.execute("""
+            SELECT COUNT(*)
+            FROM plans
+            WHERE city IS NOT NULL
+              AND TRIM(city) != ''
+        """).fetchone()[0]
+
+    return {
+        "total_plans": total,
+        "plans_with_city": regional_count,
+        "regional_data_complete": total > 0 and regional_count == total,
+        "cities": [row["city"] for row in rows],
+        "pincodes": [row["pincode"] for row in pincode_rows],
+    }
+

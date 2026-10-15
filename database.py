@@ -161,16 +161,17 @@ def save_or_update_plan(plan):
 
 
 
+
 def get_plans(city=None, max_price=None, pincode=None):
     query = "SELECT * FROM plans WHERE 1 = 1"
     parameters = []
 
     if city:
-        query += " AND LOWER(city) = LOWER(?)"
+        query += " AND LOWER(TRIM(city)) = LOWER(TRIM(?))"
         parameters.append(city.strip())
 
     if pincode:
-        query += " AND pincode = ?"
+        query += " AND TRIM(pincode) = ?"
         parameters.append(pincode.strip())
 
     if max_price is not None:
