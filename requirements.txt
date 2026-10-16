@@ -4,5 +4,7 @@ uvicorn[standard]
 requests
 beautifulsoup4
 jinja2
-steel-sdk
+
+
+browserbase
 playwright
