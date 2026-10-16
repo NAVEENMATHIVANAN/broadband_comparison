@@ -94,37 +94,37 @@ def extract_plans(page_text):
 
         # Keep advertised benefits without interpreting them as prices.
         benefits = []
+        index = 0
 
-        for line in block:
-            normalized = line.lower()
+        while index < len(block):
+            line = block[index].strip()
+            lower_line = line.lower()
 
-            if price_pattern.search(line):
-                continue
-
-            if re.search(
-                r"\b\d+(?:\.\d+)?\s*(?:Mbps|Gbps)\b",
-                line,
-                re.IGNORECASE,
+            # Combine "Unlimited" and "internet" into one benefit.
+            if (
+                lower_line == "unlimited"
+                and index + 1 < len(block)
+                and block[index + 1].strip().lower() == "internet"
             ):
+                benefits.append("Unlimited internet")
+                index += 2
                 continue
 
-            if normalized in {
+            # Ignore interface labels.
+            if lower_line not in {
+                "",
                 "speed",
-                "unlimited",
-                "internet",
                 "view details",
                 "select",
                 "new",
+                "unlimited",
+                "internet",
             }:
-                continue
+                benefits.append(line)
 
-            if re.fullmatch(r"\+\s*\d+", line):
-                benefits.append(line + " additional benefit(s) listed")
-                continue
+            index += 1
 
-            benefits.append(line)
-
-        offer = "; ".join(benefits) or None
+        offer = " | ".join(dict.fromkeys(benefits)) or None
 
         candidates.append({
             "provider": PROVIDER,
