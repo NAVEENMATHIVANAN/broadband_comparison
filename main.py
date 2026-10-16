@@ -1,11 +1,9 @@
-
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
 
 from database import get_plans, get_connection, init_db
 from scraper import run_scraper
@@ -15,8 +13,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(
     title="Broadband Price Comparison API",
-    description="Compare broadband plans in India.",
-    version="1.1.0",
+    description="Compare broadband plans in India. Regional results require verified availability.",
+    version="1.2.0",
 )
 
 app.mount(
@@ -25,9 +23,7 @@ app.mount(
     name="static",
 )
 
-templates = Jinja2Templates(
-    directory=str(BASE_DIR / "templates")
-)
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
 @app.on_event("startup")
@@ -56,21 +52,25 @@ def list_plans(
     if city == "":
         raise HTTPException(400, "City cannot be empty.")
 
-    if pincode and (
-        not pincode.isdigit() or len(pincode) != 6
-    ):
-        raise HTTPException(
-            400, "PIN code must contain exactly 6 digits."
-        )
+    if pincode and (not pincode.isdigit() or len(pincode) != 6):
+        raise HTTPException(400, "PIN code must contain exactly 6 digits.")
 
-    plans = get_plans(
-        city=city,
-        max_price=max_price,
-        pincode=pincode,
-    )
+    plans = get_plans(city=city, max_price=max_price, pincode=pincode)
+    regional_search = bool(city or pincode)
 
     return {
         "count": len(plans),
+        "catalogue_mode": (
+            "verified_regional_results" if regional_search
+            else "nationwide_catalogue"
+        ),
+        "availability_note": (
+            "Only plans marked as availability-verified for the requested "
+            "region are returned."
+            if regional_search
+            else "Nationwide plan information may include plans whose local "
+                 "availability has not been verified."
+        ),
         "filters": {
             "city": city,
             "pincode": pincode,
@@ -83,7 +83,16 @@ def list_plans(
 @app.get("/offers")
 def list_offers(
     city: str | None = Query(default=None),
+    pincode: str | None = Query(default=None),
 ):
+    city = city.strip() if city else None
+    pincode = pincode.strip() if pincode else None
+
+    if city == "":
+        raise HTTPException(400, "City cannot be empty.")
+    if pincode and (not pincode.isdigit() or len(pincode) != 6):
+        raise HTTPException(400, "PIN code must contain exactly 6 digits.")
+
     query = """
         SELECT * FROM plans
         WHERE offer IS NOT NULL
@@ -91,22 +100,29 @@ def list_offers(
     """
     parameters = []
 
-    if city and city.strip():
-        query += " AND LOWER(city) = LOWER(?)"
-        parameters.append(city.strip())
+    if city:
+        query += " AND availability_verified = 1 AND LOWER(TRIM(city)) = LOWER(TRIM(?))"
+        parameters.append(city)
+    if pincode:
+        if not city:
+            query += " AND availability_verified = 1"
+        query += " AND TRIM(pincode) = ?"
+        parameters.append(pincode)
 
     query += " ORDER BY price ASC"
 
     with get_connection() as connection:
-        rows = connection.execute(
-            query, parameters
-        ).fetchall()
+        rows = connection.execute(query, parameters).fetchall()
 
     offers = [dict(row) for row in rows]
-
     return {
         "count": len(offers),
         "city": city,
+        "pincode": pincode,
+        "catalogue_mode": (
+            "verified_regional_results" if city or pincode
+            else "nationwide_catalogue"
+        ),
         "offers": offers,
     }
 
@@ -120,21 +136,18 @@ def scrape_plans():
             "processed_count": count,
         }
     except Exception as error:
-        raise HTTPException(
-            500, "The scraping process failed."
-        ) from error
-
+        raise HTTPException(500, "The scraping process failed.") from error
 
 
 @app.get("/regions")
 def list_regions():
-    """List cities and PIN codes actually recorded in the database."""
-
+    """List only regions attached to plans explicitly marked as verified."""
     with get_connection() as connection:
         rows = connection.execute("""
             SELECT DISTINCT city
             FROM plans
-            WHERE city IS NOT NULL
+            WHERE availability_verified = 1
+              AND city IS NOT NULL
               AND TRIM(city) != ''
             ORDER BY city
         """).fetchall()
@@ -142,7 +155,8 @@ def list_regions():
         pincode_rows = connection.execute("""
             SELECT DISTINCT pincode
             FROM plans
-            WHERE pincode IS NOT NULL
+            WHERE availability_verified = 1
+              AND pincode IS NOT NULL
               AND TRIM(pincode) != ''
             ORDER BY pincode
         """).fetchall()
@@ -151,18 +165,23 @@ def list_regions():
             "SELECT COUNT(*) FROM plans"
         ).fetchone()[0]
 
-        regional_count = connection.execute("""
-            SELECT COUNT(*)
-            FROM plans
-            WHERE city IS NOT NULL
+        verified_count = connection.execute("""
+            SELECT COUNT(*) FROM plans
+            WHERE availability_verified = 1
+        """).fetchone()[0]
+
+        verified_city_count = connection.execute("""
+            SELECT COUNT(*) FROM plans
+            WHERE availability_verified = 1
+              AND city IS NOT NULL
               AND TRIM(city) != ''
         """).fetchone()[0]
 
     return {
         "total_plans": total,
-        "plans_with_city": regional_count,
-        "regional_data_complete": total > 0 and regional_count == total,
+        "availability_verified_plans": verified_count,
+        "plans_with_city": verified_city_count,
+        "regional_data_complete": total > 0 and verified_count == total,
         "cities": [row["city"] for row in rows],
         "pincodes": [row["pincode"] for row in pincode_rows],
     }
-

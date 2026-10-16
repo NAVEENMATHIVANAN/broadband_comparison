@@ -1,4 +1,3 @@
-
 import sqlite3
 from pathlib import Path
 
@@ -13,6 +12,7 @@ def get_connection():
 
 
 def init_db():
+    """Create the plans table and safely migrate older local databases."""
     connection = get_connection()
 
     try:
@@ -31,13 +31,16 @@ def init_db():
                 offer_expiry TEXT,
                 source_url TEXT NOT NULL,
                 last_updated TEXT NOT NULL,
+                availability_verified INTEGER NOT NULL DEFAULT 0,
+                availability_checked_at TEXT,
+                availability_evidence_url TEXT,
                 CHECK (price IS NULL OR price >= 0),
                 CHECK (offer_price IS NULL OR offer_price >= 0),
-                CHECK (speed_mbps IS NULL OR speed_mbps > 0)
+                CHECK (speed_mbps IS NULL OR speed_mbps > 0),
+                CHECK (availability_verified IN (0, 1))
             )
         """)
 
-        # Migrate databases created by the earlier schema.
         columns = {
             row["name"]
             for row in connection.execute(
@@ -45,24 +48,39 @@ def init_db():
             ).fetchall()
         }
 
-        if "offer_expiry" not in columns:
-            connection.execute(
-                "ALTER TABLE plans ADD COLUMN offer_expiry TEXT"
-            )
+        migrations = {
+            "offer_expiry": "ALTER TABLE plans ADD COLUMN offer_expiry TEXT",
+            "availability_verified": (
+                "ALTER TABLE plans ADD COLUMN "
+                "availability_verified INTEGER NOT NULL DEFAULT 0"
+            ),
+            "availability_checked_at": (
+                "ALTER TABLE plans ADD COLUMN availability_checked_at TEXT"
+            ),
+            "availability_evidence_url": (
+                "ALTER TABLE plans ADD COLUMN availability_evidence_url TEXT"
+            ),
+        }
+
+        for column, sql in migrations.items():
+            if column not in columns:
+                connection.execute(sql)
 
         connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_plans_city
             ON plans(city)
         """)
-
         connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_plans_price
             ON plans(price)
         """)
-
         connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_plans_provider
             ON plans(provider)
+        """)
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_plans_availability
+            ON plans(availability_verified)
         """)
 
         connection.commit()
@@ -73,9 +91,7 @@ def init_db():
 
 
 def save_or_update_plan(plan):
-    """Insert a validated plan or update its existing record."""
-
-    # Never save incomplete or invalid scraped records.
+    """Insert/update a plan while preserving verification unless explicitly changed."""
     if (
         not plan.get("provider")
         or not plan.get("plan_name")
@@ -87,6 +103,24 @@ def save_or_update_plan(plan):
         or plan["speed_mbps"] <= 0
     ):
         raise ValueError("Plan failed validation")
+
+    availability_verified = plan.get("availability_verified")
+    if availability_verified is not None:
+        availability_verified = int(bool(availability_verified))
+
+    if availability_verified == 1:
+        if not (plan.get("city") or plan.get("pincode")):
+            raise ValueError(
+                "A regionally verified plan must include a city or PIN code."
+            )
+        if not plan.get("availability_evidence_url"):
+            raise ValueError(
+                "A regionally verified plan must include availability_evidence_url."
+            )
+        if not plan.get("availability_checked_at"):
+            raise ValueError(
+                "A regionally verified plan must include availability_checked_at."
+            )
 
     connection = get_connection()
 
@@ -115,7 +149,10 @@ def save_or_update_plan(plan):
                     offer = COALESCE(?, offer),
                     offer_price = ?,
                     offer_expiry = COALESCE(?, offer_expiry),
-                    last_updated = ?
+                    last_updated = ?,
+                    availability_verified = COALESCE(?, availability_verified),
+                    availability_checked_at = COALESCE(?, availability_checked_at),
+                    availability_evidence_url = COALESCE(?, availability_evidence_url)
                 WHERE id = ?
             """, (
                 plan["price"],
@@ -125,6 +162,9 @@ def save_or_update_plan(plan):
                 plan.get("offer_price"),
                 plan.get("offer_expiry"),
                 plan["last_updated"],
+                availability_verified,
+                plan.get("availability_checked_at"),
+                plan.get("availability_evidence_url"),
                 existing["id"],
             ))
         else:
@@ -132,9 +172,11 @@ def save_or_update_plan(plan):
                 INSERT INTO plans (
                     provider, plan_name, price, speed_mbps,
                     state, city, pincode, offer, offer_price,
-                    offer_expiry, source_url, last_updated
+                    offer_expiry, source_url, last_updated,
+                    availability_verified, availability_checked_at,
+                    availability_evidence_url
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 plan["provider"],
                 plan["plan_name"],
@@ -148,6 +190,9 @@ def save_or_update_plan(plan):
                 plan.get("offer_expiry"),
                 plan["source_url"],
                 plan["last_updated"],
+                availability_verified if availability_verified is not None else 0,
+                plan.get("availability_checked_at"),
+                plan.get("availability_evidence_url"),
             ))
 
         connection.commit()
@@ -160,17 +205,22 @@ def save_or_update_plan(plan):
         connection.close()
 
 
-
-
 def get_plans(city=None, max_price=None, pincode=None):
+    """
+    No location filter: return the nationwide information catalogue.
+    With a city or PIN: return only availability-verified regional matches.
+    """
     query = "SELECT * FROM plans WHERE 1 = 1"
     parameters = []
 
     if city:
+        query += " AND availability_verified = 1"
         query += " AND LOWER(TRIM(city)) = LOWER(TRIM(?))"
         parameters.append(city.strip())
 
     if pincode:
+        if not city:
+            query += " AND availability_verified = 1"
         query += " AND TRIM(pincode) = ?"
         parameters.append(pincode.strip())
 
@@ -181,9 +231,7 @@ def get_plans(city=None, max_price=None, pincode=None):
     query += " ORDER BY price ASC"
 
     with get_connection() as connection:
-        rows = connection.execute(
-            query, parameters
-        ).fetchall()
+        rows = connection.execute(query, parameters).fetchall()
 
     return [dict(row) for row in rows]
 

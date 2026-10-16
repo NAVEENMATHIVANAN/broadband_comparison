@@ -61,7 +61,7 @@
         <div class="section-heading">
             <div>
                 <h2>Broadband plans</h2>
-                <p id="resultCount" class="muted">Loading plans...</p>
+                <p id="resultCount" class="muted">Loading plans...</p>\n                <p id="catalogueNote" class="muted small"></p>
             </div>
             <button id="compareBtn" type="button" disabled>
                 Compare selected (0/3)
@@ -79,7 +79,7 @@
                         <th>Speed</th>
                         <th>Monthly price</th>
                         <th>Offer</th>
-                        <th>Verified</th>
+                        <th>Availability</th>
                         <th>Source</th>
                     </tr>
                 </thead>
@@ -127,7 +127,7 @@ const statusBox = document.getElementById("status");
 const compareBtn = document.getElementById("compareBtn");
 const comparison = document.getElementById("comparison");
 const comparisonContent = document.getElementById("comparisonContent");
-const offersList = document.getElementById("offersList");
+const offersList = document.getElementById("offersList");\nconst catalogueNote = document.getElementById("catalogueNote");
 
 let currentPlans = [];
 let selectedIds = new Set();
@@ -181,7 +181,7 @@ async function loadPlans() {
 
     try {
         const data = await fetchJSON(buildPlansURL());
-        currentPlans = data.plans || [];
+        currentPlans = data.plans || [];\n        catalogueNote.textContent = data.availability_note || "";
 
         const sort = document.getElementById("sort").value;
         currentPlans.sort((a, b) => {
@@ -287,7 +287,24 @@ function renderPlans() {
         }
 
         const updatedCell = document.createElement("td");
-        updatedCell.textContent = dateText(plan.last_updated);
+        const availability = document.createElement("strong");
+        availability.textContent = Number(plan.availability_verified) === 1
+            ? "Verified for region"
+            : "Regional availability unverified";
+        updatedCell.append(availability);
+        if (Number(plan.availability_verified) === 1) {
+            const regionText = document.createElement("div");
+            regionText.className = "muted small";
+            regionText.textContent = [plan.city, plan.pincode]
+                .filter(Boolean).join(" · ");
+            updatedCell.append(regionText);
+            if (plan.availability_checked_at) {
+                const checked = document.createElement("div");
+                checked.className = "muted small";
+                checked.textContent = "Checked: " + dateText(plan.availability_checked_at);
+                updatedCell.append(checked);
+            }
+        }
 
         const sourceCell = document.createElement("td");
         const link = document.createElement("a");
@@ -335,8 +352,12 @@ function renderComparison() {
         price.textContent = "Regular price: " + money(plan.price);
         const offer = document.createElement("p");
         offer.textContent = "Offer price: " + money(plan.offer_price);
+        const availability = document.createElement("p");
+        availability.textContent = Number(plan.availability_verified) === 1
+            ? "Regional availability verified"
+            : "Regional availability not verified";
 
-        card.append(title, name, speed, price, offer);
+        card.append(title, name, speed, price, offer, availability);
         comparisonContent.append(card);
     }
 }
@@ -367,7 +388,9 @@ async function loadOffers() {
             price.textContent = "Regular price: " + money(plan.price);
             const updated = document.createElement("p");
             updated.className = "muted small";
-            updated.textContent = "Verified: " + dateText(plan.last_updated);
+            updated.textContent = Number(plan.availability_verified) === 1
+                ? "Regional availability verified"
+                : "Regional availability unverified";
 
             card.append(heading, description, price, updated);
             offersList.append(card);
