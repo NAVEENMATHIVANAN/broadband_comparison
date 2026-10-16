@@ -1,12 +1,14 @@
- 
 import argparse
 import csv
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from database import init_db, save_or_update_plan
 
 
-INPUT_FILE = Path("bsnl_validation_report.csv")
+BASE_DIR = Path(__file__).resolve().parent
+INPUT_FILE = BASE_DIR / "bsnl_validation_report.csv"
 
 
 def positive_number(value):
@@ -18,103 +20,113 @@ def positive_number(value):
 
 
 def is_verified(value):
-    return str(value or "").strip().lower() in {
-        "yes", "true", "1"
-    }
+    return str(value or "").strip().lower() in {"yes", "true", "1"}
+
+
+def valid_https_url(value):
+    parsed = urlparse(str(value or "").strip())
+    return parsed.scheme == "https" and bool(parsed.netloc)
+
+
+def valid_checked_at(value):
+    value = str(value or "").strip()
+    if not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
 
 
 def check_import_eligibility(row):
-    """Recheck critical requirements immediately before importing."""
+    """Recheck every safety condition immediately before any database write."""
     reasons = []
 
-    if row.get("validation_status") != "READY_FOR_IMPORT":
+    if str(row.get("validation_status", "")).strip() != "READY_FOR_IMPORT":
         reasons.append("Validation status is not READY_FOR_IMPORT")
-
-    if str(row.get("review_required", "")).lower().strip() != "no":
+    if str(row.get("review_required", "")).strip().lower() != "no":
         reasons.append("Plan still requires review")
-
-    if str(row.get("billing_period", "")).lower().strip() != "monthly":
+    if str(row.get("billing_period", "")).strip().lower() != "monthly":
         reasons.append("Monthly billing period is not confirmed")
 
     price = positive_number(row.get("price"))
     speed = positive_number(row.get("speed_mbps"))
-
     if price is None:
         reasons.append("Valid monthly price is missing")
-
     if speed is None or not speed.is_integer():
         reasons.append("Valid whole-number speed is missing")
 
     if not is_verified(row.get("availability_verified")):
         reasons.append("Regional availability is not verified")
-
     if not str(row.get("provider", "")).strip():
         reasons.append("Provider is missing")
-
     if not str(row.get("plan_name", "")).strip():
         reasons.append("Plan name is missing")
-
-    source_url = str(row.get("source_url", "")).strip()
-
-    if not source_url.startswith("https://"):
-        reasons.append("A valid HTTPS source URL is required")
+    if not valid_https_url(row.get("source_url")):
+        reasons.append("A valid HTTPS plan source URL is required")
+    if not valid_https_url(row.get("availability_evidence_url")):
+        reasons.append("A valid HTTPS regional availability evidence URL is required")
+    if not valid_checked_at(row.get("availability_checked_at")):
+        reasons.append("Availability verification timestamp with timezone is missing/invalid")
 
     city = str(row.get("city") or "").strip()
     pincode = str(row.get("pincode") or "").strip()
-
     if not city and not pincode:
         reasons.append("City or PIN code is missing")
-
-    if pincode and (
-        len(pincode) != 6 or not pincode.isdigit()
-    ):
+    if pincode and (len(pincode) != 6 or not pincode.isdigit()):
         reasons.append("PIN code must contain six digits")
 
     return reasons
 
 
 def make_database_plan(row):
-    """Map the validated CSV fields to the existing plans table."""
+    """Map reviewed report data into the Stage 20 plans schema."""
     return {
         "provider": row["provider"].strip(),
         "plan_name": row["plan_name"].strip(),
         "price": float(row["price"]),
         "speed_mbps": int(float(row["speed_mbps"])),
-        "state": row.get("state") or None,
-        "city": row.get("city") or None,
-        "pincode": row.get("pincode") or None,
-        "offer": row.get("offer") or "",
+        "state": (row.get("state") or "").strip() or None,
+        "city": (row.get("city") or "").strip() or None,
+        "pincode": (row.get("pincode") or "").strip() or None,
+        "offer": (row.get("offer") or "").strip() or None,
         "offer_price": (
             float(row["offer_price"])
             if positive_number(row.get("offer_price")) is not None
             else None
         ),
-        "offer_expiry": row.get("offer_expiry") or None,
+        "offer_expiry": (row.get("offer_expiry") or "").strip() or None,
         "source_url": row["source_url"].strip(),
-        "last_updated": row.get("last_updated") or None,
+        "last_updated": (row.get("last_updated") or "").strip() or None,
+        "availability_verified": True,
+        "availability_checked_at": datetime.fromisoformat(
+            row["availability_checked_at"].strip().replace("Z", "+00:00")
+        ).isoformat(timespec="seconds"),
+        "availability_evidence_url": row["availability_evidence_url"].strip(),
     }
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Preview or import validated BSNL plans."
+        description="Preview or import validated BSNL plans with regional evidence."
     )
     parser.add_argument(
-        "--save",
-        action="store_true",
-        help="Save eligible plans to SQLite. Without this, preview only.",
+        "--save", action="store_true",
+        help="Save eligible plans after confirmation. Default is preview only."
+    )
+    parser.add_argument(
+        "--input", type=Path, default=INPUT_FILE,
+        help="Validation report path (default: bsnl_validation_report.csv)."
     )
     args = parser.parse_args()
 
-    if not INPUT_FILE.exists():
+    if not args.input.exists():
         raise FileNotFoundError(
-            f"{INPUT_FILE} not found. Run "
-            "python validate_bsnl_candidates.py first."
+            f"{args.input} not found. Run python validate_bsnl_candidates.py first."
         )
 
-    with INPUT_FILE.open(
-        "r", newline="", encoding="utf-8-sig"
-    ) as file:
+    with args.input.open("r", newline="", encoding="utf-8-sig") as file:
         reader = csv.DictReader(file)
         rows = list(reader)
 
@@ -124,17 +136,14 @@ def main():
 
     eligible = []
     blocked = []
-
     for row in rows:
         reasons = check_import_eligibility(row)
-
         if reasons:
             blocked.append((row.get("plan_name", "(unnamed)"), reasons))
         else:
             eligible.append(row)
 
-    print()
-    print("BSNL Import Preview")
+    print("\nBSNL Import Preview")
     print("-------------------")
     print(f"Candidates checked: {len(rows)}")
     print(f"Eligible for import: {len(eligible)}")
@@ -152,36 +161,35 @@ def main():
     print("\nEligible plans:")
     for row in eligible:
         print(
-            f"- {row['plan_name']} | "
-            f"₹{float(row['price']):g}/month | "
+            f"- {row['plan_name']} | ₹{float(row['price']):g}/month | "
             f"{float(row['speed_mbps']):g} Mbps | "
             f"{row.get('city') or row.get('pincode')}"
         )
 
     if not args.save:
-        print(
-            "\nPreview only. SQLite was not modified.\n"
-            "After reviewing the evidence, use --save to import."
-        )
+        print("\nPreview only. SQLite was not modified.")
+        print("Use --save only after reviewing the regional evidence.")
         return
 
     confirmation = input(
-        "\nType IMPORT to save these plans to SQLite: "
+        "\nType IMPORT to save these region-verified BSNL plans to SQLite: "
     ).strip()
-
     if confirmation != "IMPORT":
         print("Import cancelled. SQLite was not modified.")
         return
 
     init_db()
-
     imported = 0
-
+    failed = 0
     for row in eligible:
-        save_or_update_plan(make_database_plan(row))
-        imported += 1
+        try:
+            save_or_update_plan(make_database_plan(row))
+            imported += 1
+        except Exception as error:
+            failed += 1
+            print(f"Save failed for {row.get('plan_name', '(unnamed)')}: {error}")
 
-    print(f"\nImport complete. Processed {imported} eligible plans.")
+    print(f"\nImport complete. Imported/updated: {imported}; save failures: {failed}")
 
 
 if __name__ == "__main__":
