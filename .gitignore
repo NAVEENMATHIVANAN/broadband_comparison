@@ -5,3 +5,5 @@ __pycache__/
 *.py[cod]
 .env
 broadband.db
+regional_plans.csv
+plan_candidates.csv
