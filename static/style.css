@@ -296,3 +296,25 @@ footer {
         padding: 0;
     }
 }
+
+.availability-banner {
+    margin: 16px 0;
+    padding: 14px 16px;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.availability-banner strong {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.availability-banner p {
+    margin: 0;
+}
+
+.availability-banner.regional-mode {
+    border-color: #86b99a;
+    background: #f0fdf4;
+}
