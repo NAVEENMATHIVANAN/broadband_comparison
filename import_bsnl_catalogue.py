@@ -1,7 +1,6 @@
-
 import argparse
 import csv
-import shutil
+import re
 import sqlite3
 from collections import Counter
 from datetime import datetime
@@ -18,39 +17,40 @@ def truthy(value):
     return str(value or "").strip().lower() in {"yes", "true", "1", "required"}
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="Apply the import after previewing the candidate records.",
+def normalize_name(value):
+    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
+
+
+def backup_database(connection):
+    backup_path = BASE / (
+        f"broadband_before_bsnl_upsert_{datetime.now():%Y%m%d_%H%M%S}.db"
     )
-    args = parser.parse_args()
+    backup = sqlite3.connect(str(backup_path))
+    try:
+        connection.backup(backup)
+    finally:
+        backup.close()
+    return backup_path
 
-    if not CSV_PATH.exists() or not DB_PATH.exists():
-        raise FileNotFoundError(
-            "Required file missing: bsnl_candidates.csv or broadband.db"
-        )
 
+def load_candidates():
+    if not CSV_PATH.exists():
+        raise FileNotFoundError(f"Missing CSV: {CSV_PATH}")
     with CSV_PATH.open(encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
-        columns = set(reader.fieldnames or [])
+        headers = set(reader.fieldnames or [])
 
     required = {"plan_name", "price", "speed_mbps", "billing_period"}
-    if not required.issubset(columns):
-        raise ValueError(
-            f"CSV missing required columns: {sorted(required - columns)}"
-        )
+    if not required.issubset(headers):
+        raise ValueError(f"CSV missing required columns: {sorted(required - headers)}")
 
     accepted = []
     excluded = Counter()
-
     for line, row in enumerate(rows, start=2):
         name = (row.get("plan_name") or "").strip()
         billing = (row.get("billing_period") or "").strip().lower()
         review = truthy(row.get("review_required"))
-
         try:
             price = float(str(row.get("price") or "").replace(",", "").strip())
             speed = float(str(row.get("speed_mbps") or "").replace(",", "").strip())
@@ -61,7 +61,6 @@ def main():
         if not name or price <= 0 or speed <= 0:
             excluded["missing_name_or_nonpositive_price_or_speed"] += 1
             continue
-
         if billing not in {"monthly", "month", "1 month"}:
             excluded["billing_not_confirmed_monthly"] += 1
             continue
@@ -71,48 +70,58 @@ def main():
             excluded["source_not_https"] += 1
             continue
 
-        offer_parts = [
-            (row.get("offer") or "").strip(),
-            "Billing period: monthly.",
-        ]
+        parts = [(row.get("offer") or "").strip(), "Billing period: monthly."]
         if review:
-            offer_parts.append(
+            parts.append(
                 "REVIEW REQUIRED: eligibility or plan terms must be checked "
                 "before recommending this plan to a customer."
             )
-
-        # Preserve available candidate details without claiming regional coverage.
         for field in ("billing_period", "review_required"):
             value = (row.get(field) or "").strip()
             if value:
-                offer_parts.append(f"{field}: {value}.")
+                parts.append(f"{field}: {value}.")
 
         accepted.append({
             "name": name,
+            "name_key": normalize_name(name),
             "price": price,
             "speed": speed,
             "state": (row.get("state") or "").strip() or None,
             "city": (row.get("city") or "").strip() or None,
-            "offer": " ".join(part for part in offer_parts if part),
+            "offer": " ".join(part for part in parts if part),
             "source": source,
             "last_updated": (
-                row.get("last_updated") or
-                datetime.now().astimezone().isoformat(timespec="seconds")
+                (row.get("last_updated") or "").strip()
+                or datetime.now().astimezone().isoformat(timespec="seconds")
             ),
             "review": review,
         })
 
-    # Detect duplicates by normalized plan name. Do not silently choose
-    # between potentially different records with the same name.
-    name_counts = Counter(p["name"].casefold() for p in accepted)
-    duplicates = [name for name, count in name_counts.items() if count > 1]
+    counts = Counter(p["name_key"] for p in accepted)
+    duplicates = [name for name, count in counts.items() if count > 1]
     if duplicates:
-        print("Duplicate plan names need review:")
-        for name in duplicates:
-            print("  ", name)
-        raise ValueError("Resolve duplicate candidate names before importing.")
+        raise ValueError(
+            "Duplicate normalized BSNL plan names in CSV; resolve before import: "
+            f"{duplicates}"
+        )
+    return rows, accepted, excluded
 
-    print(f"Source candidate rows: {len(rows)}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Safely upsert BSNL catalogue rows by normalized plan name."
+    )
+    parser.add_argument(
+        "--apply", action="store_true",
+        help="Write changes. Without this flag, perform a read-only preview.",
+    )
+    args = parser.parse_args()
+
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Missing database: {DB_PATH}")
+    source_rows, accepted, excluded = load_candidates()
+
+    print(f"Source candidate rows: {len(source_rows)}")
     print(f"Eligible monthly catalogue rows: {len(accepted)}")
     print(f"Rows needing eligibility/terms review: {sum(p['review'] for p in accepted)}")
     print(f"Excluded rows: {sum(excluded.values())}")
@@ -121,91 +130,110 @@ def main():
 
     print("\nEligible records:")
     for p in sorted(accepted, key=lambda item: (item["price"], item["speed"])):
-        review_label = " [REVIEW REQUIRED]" if p["review"] else ""
-        print(f"  ₹{p['price']:,.2f} | {p['speed']:g} Mbps | {p['name']}{review_label}")
+        label = " [REVIEW REQUIRED]" if p["review"] else ""
+        print(f"  ₹{p['price']:,.2f} | {p['speed']:g} Mbps | {p['name']}{label}")
 
     if not args.apply:
-        print("\nPREVIEW ONLY. No database changes were made.")
-        print("Review this output, then rerun with --apply to import.")
+        print("\nPREVIEW ONLY. No database changes made. Use --apply to write.")
         return
-
     if not accepted:
         raise ValueError("No eligible records to import.")
 
-    backup = BASE / (
-        f"broadband_before_bsnl_import_{datetime.now():%Y%m%d_%H%M%S}.db"
-    )
-    shutil.copy2(DB_PATH, backup)
-    print(f"\nDatabase backup: {backup.name}")
-
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(str(DB_PATH), timeout=30)
+    connection.row_factory = sqlite3.Row
     try:
-        connection.execute("BEGIN IMMEDIATE")
         columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(plans)")
+            row["name"] for row in connection.execute("PRAGMA table_info(plans)")
         }
         required_db = {
-            "provider", "plan_name", "price", "speed_mbps", "state", "city",
+            "id", "provider", "plan_name", "price", "speed_mbps", "state", "city",
             "pincode", "offer", "offer_price", "offer_expiry", "source_url",
-            "last_updated", "availability_verified",
-            "availability_checked_at", "availability_evidence_url",
+            "last_updated", "availability_verified", "availability_checked_at",
+            "availability_evidence_url", "official_plan_id",
         }
         if not required_db.issubset(columns):
             raise RuntimeError(
-                f"Unexpected plans schema; missing {sorted(required_db - columns)}"
+                "Run Stage 44 first. Missing database columns: "
+                f"{sorted(required_db - columns)}"
             )
 
         before = dict(connection.execute(
             "SELECT provider, COUNT(*) FROM plans GROUP BY provider"
-        ))
+        ).fetchall())
+        backup_path = backup_database(connection)
+        print(f"\nDatabase backup: {backup_path.name}")
 
-        # Replace only BSNL catalogue rows. Other providers are untouched.
-        connection.execute("DELETE FROM plans WHERE provider = ?", (PROVIDER,))
-
+        inserted = updated = 0
+        connection.execute("BEGIN IMMEDIATE")
         for p in accepted:
-            connection.execute(
-                """
-                INSERT INTO plans (
-                    provider, plan_name, price, speed_mbps,
-                    state, city, pincode, offer,
-                    offer_price, offer_expiry, source_url, last_updated,
-                    availability_verified, availability_checked_at,
-                    availability_evidence_url
+            matches = connection.execute("""
+                SELECT id, plan_name, official_plan_id
+                FROM plans
+                WHERE provider = ? AND lower(trim(plan_name)) = ?
+            """, (PROVIDER, p["name_key"])).fetchall()
+
+            if len(matches) > 1:
+                raise RuntimeError(
+                    f"Multiple existing BSNL rows match plan name {p['name']!r}; "
+                    "resolve ambiguity manually."
                 )
-                VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, 0, NULL, NULL)
-                """,
-                (
-                    PROVIDER, p["name"], p["price"], p["speed"],
-                    p["state"], p["city"], p["offer"], p["source"],
-                    p["last_updated"],
-                ),
-            )
+
+            if matches:
+                row = matches[0]
+                connection.execute("""
+                    UPDATE plans
+                    SET plan_name = ?, price = ?, speed_mbps = ?,
+                        state = ?, city = ?, offer = ?, source_url = ?,
+                        last_updated = ?
+                    WHERE id = ?
+                """, (
+                    p["name"], p["price"], p["speed"], p["state"], p["city"],
+                    p["offer"], p["source"], p["last_updated"], row["id"],
+                ))
+                updated += 1
+            else:
+                connection.execute("""
+                    INSERT INTO plans (
+                        provider, plan_name, price, speed_mbps, state, city,
+                        pincode, offer, offer_price, offer_expiry, source_url,
+                        last_updated, availability_verified,
+                        availability_checked_at, availability_evidence_url,
+                        official_plan_id
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, ?, 0,
+                            NULL, NULL, NULL)
+                """, (
+                    PROVIDER, p["name"], p["price"], p["speed"], p["state"],
+                    p["city"], p["offer"], p["source"], p["last_updated"],
+                ))
+                inserted += 1
 
         after = dict(connection.execute(
             "SELECT provider, COUNT(*) FROM plans GROUP BY provider"
-        ))
+        ).fetchall())
+        for other in ("Airtel Xstream Fiber", "Tata Play Fiber"):
+            if before.get(other, 0) != after.get(other, 0):
+                raise RuntimeError(f"{other} row count changed unexpectedly.")
 
-        for provider in ("Airtel Xstream Fiber", "Tata Play Fiber"):
-            if before.get(provider, 0) != after.get(provider, 0):
-                raise RuntimeError(f"{provider} row count changed unexpectedly.")
-
-        verified = connection.execute(
-            """
+        verified = connection.execute("""
             SELECT COUNT(*) FROM plans
             WHERE provider = ? AND availability_verified = 1
-            """,
-            (PROVIDER,),
-        ).fetchone()[0]
-        if verified:
-            raise RuntimeError("BSNL rows must remain regionally unverified.")
+        """, (PROVIDER,)).fetchone()[0]
 
         connection.commit()
-        print("\nBSNL catalogue import successful.")
+        print("\nBSNL upsert completed successfully.")
+        print(f"Inserted: {inserted}")
+        print(f"Updated: {updated}")
         print("Provider counts:")
         for provider, count in sorted(after.items()):
             print(f"  {provider}: {count}")
         print("BSNL regionally verified rows:", verified)
-
+        print("Existing rows absent from this CSV were retained.")
+        print("Regional verification fields were preserved.")
+        print(
+            "Note: BSNL matching uses normalized plan names because the current "
+            "candidate importer does not expose a verified official plan ID."
+        )
     except Exception:
         connection.rollback()
         raise
