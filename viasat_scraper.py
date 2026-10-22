@@ -155,6 +155,16 @@ def _extract_broadband_label(block):
         r"Lifetime Lease Fee\s*:?\s*(?:\(if applicable\)\s*)?"
         r"(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
     )
+    logger.warning(
+    "VIASAT LIFETIME LEASE SOURCE TEXT: %s",
+    re.search(
+        r".{0,80}Lifetime Lease Fee.{0,120}",
+        text,
+        re.I,
+    ).group(0)
+    if re.search(r"Lifetime Lease Fee", text, re.I)
+    else "Exact phrase not found",
+    )
     installation_range = captured(
         r"Installation Fee\s*:?\s*(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?\s*-\s*\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
     )
@@ -187,6 +197,7 @@ def _extract_broadband_label(block):
     ):
         lifetime_lease += " (if applicable)"
 
+    logger.warning("VIASAT LIFETIME LEASE DEBUG: lifetime_lease=%r", lifetime_lease)
     return {
         "monthly_service_fee": fee,
         "monthly_fee_after_promo": (
