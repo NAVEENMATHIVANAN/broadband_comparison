@@ -1,9 +1,8 @@
-"""Address-based Viasat lookup through Browserbase + Playwright.
+"""Address-based Viasat lookup through local Playwright.
 
 This module does not persist submitted addresses or lookup results.
 """
 import logging
-import os
 import re
 from datetime import datetime, timezone
 
@@ -75,6 +74,194 @@ def _fill(page, patterns, value, required=False):
     field.fill(value, timeout=5000)
     return True
 
+
+
+def _extract_broadband_label(block):
+    """Parse structured broadband-label fields from captured label text."""
+    text = re.sub(r"\s+", " ", block).strip()
+
+    def number(pattern):
+        match = re.search(pattern, text, re.I)
+        return float(match.group(1).replace(",", "")) if match else None
+
+    download = number(
+        r"Typical download speeds?\s*:?\s*(\d+(?:\.\d+)?)\s*Mbps"
+    )
+    upload = number(
+        r"Typical upload speeds?\s*:?\s*(\d+(?:\.\d+)?)\s*Mbps"
+    )
+    latency = number(
+        r"Typical latency\s*:?\s*(\d+(?:\.\d+)?)\s*ms"
+    )
+
+    fee = number(
+        r"Monthly Service Fee\s*:?\s*\$?\s*"
+        r"(\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+    )
+
+    after = re.search(
+        r"Monthly Service Fee\s+will be\s+\$?\s*"
+        r"(\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+        r"\s+after\s+(\d+)\s+months",
+        text,
+        re.I,
+    )
+
+    data = re.search(
+        r"Data included with Monthly Price\s*:?\s*"
+        r"(Unlimited|[\d,]+\s*GB)",
+        text,
+        re.I,
+    )
+
+    contract = re.search(
+        r"Contract term\s*:?\s*"
+        r"(24\s*months|month-to-month|month to month|no contract)",
+        text,
+        re.I,
+    )
+
+    # Parse additional charges from the flattened FCC label text.
+    # Viasat's label uses phrases such as "Monthly Lease Fee" and
+    # "Charges for Additional Data Usage", so support those exact variants.
+    def captured(pattern):
+        match = re.search(pattern, text, re.I)
+        return re.sub(r"\s+", " ", match.group(1)).strip(" .;:, ") if match else None
+
+    government_taxes = (
+        "Varies by location"
+        if re.search(
+            r"Government Taxes?\s*:?\s*Varies by Location",
+            text,
+            re.I,
+        )
+        else None
+    )
+
+    admin_raw = captured(
+        r"Administrative Cost Recovery Fee\s*:?\s*(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+    )
+    admin_match = re.search(
+        r"\$?\s*(\d{1,4}(?:,\d{3})*(?:\.\d{2})?)",
+        admin_raw or "",
+    )
+    admin_fee = float(admin_match.group(1).replace(",", "")) if admin_match else None
+
+    monthly_lease = captured(
+        r"Monthly Lease Fee\s*:?\s*(?:\(if applicable\)\s*)?"
+        r"(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+    )
+    lifetime_lease = captured(
+        r"Lifetime Lease Fee\s*:?\s*(?:\(if applicable\)\s*)?"
+        r"(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+    )
+    installation_range = captured(
+        r"Installation Fee\s*:?\s*(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?\s*-\s*\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+    )
+    installation_single = captured(
+        r"Installation Fee\s*:?\s*(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)"
+    )
+    installation_fee = installation_range or installation_single
+    early_termination_fee = captured(
+        r"Early Termination Fee\s*:?\s*(\$?\s*\d{1,4}(?:,\d{3})*(?:\.\d{2})?)\s*/\s*mo"
+    )
+    additional_data_charges = (
+        "None"
+        if re.search(
+            r"Charges for Additional Data Usage\s*:?\s*None",
+            text,
+            re.I,
+        )
+        else captured(
+            r"Charges for Additional Data Usage\s*:?\s*(.*?)(?=\s+Network Management Policy\b|$)"
+        )
+    )
+
+    # Preserve conditional wording in the extracted fee fields.
+    if monthly_lease and re.search(
+        r"Monthly Lease Fee\s*\$?\s*\d[\d,.]*\s*\(if applicable\)", text, re.I
+    ):
+        monthly_lease += " (if applicable)"
+    if lifetime_lease and re.search(
+        r"Lifetime Lease Fee\s*\$?\s*\d[\d,.]*\s*\(if applicable\)", text, re.I
+    ):
+        lifetime_lease += " (if applicable)"
+
+    return {
+        "monthly_service_fee": fee,
+        "monthly_fee_after_promo": (
+            float(after.group(1).replace(",", "")) if after else None
+        ),
+        "promo_period_months": int(after.group(2)) if after else None,
+        "typical_download_mbps": download,
+        "typical_upload_mbps": upload,
+        "typical_latency_ms": latency,
+        "data_included": data.group(1) if data else None,
+        "contract_term": contract.group(1) if contract else None,
+        "government_taxes": government_taxes,
+        "administrative_cost_recovery_fee": admin_fee,
+        "monthly_equipment_lease_fee": monthly_lease,
+        "lifetime_lease_fee": lifetime_lease,
+        "early_termination_fee": early_termination_fee,
+        "installation_fee": installation_fee,
+        "additional_data_charges": additional_data_charges,
+        "full_label_text": text[:5000],
+    }
+
+
+
+def _extract_broadband_label_blocks(page):
+    """Find the separate FCC broadband-label cards rendered below the plan cards."""
+    script = r"""
+    body => {
+      const result = [];
+      const seen = new Set();
+      const specs = [
+        {key: "Essentials", re: /\bViasat\s+Essentials\b/i},
+        {key: "Unleashed Max", re: /\bViasat\s+Unleashed\s+Max\b/i},
+        {key: "Unleashed", re: /\bViasat\s+Unleashed(?!\s+Max)\b/i}
+      ];
+
+      for (const spec of specs) {
+        let best = null;
+        for (const el of body.querySelectorAll("*")) {
+          const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+          if (!text || text.length < 100 ||
+              !/Fixed Broadband Consumer Disclosure/i.test(text) ||
+              !/Monthly Service Fee/i.test(text) ||
+              !spec.re.test(text)) continue;
+
+          let parent = el;
+          while (parent && parent !== body) {
+            const parentText = (parent.innerText || "").replace(/\s+/g, " ").trim();
+            if (parentText.length > 6500) break;
+            if (parentText.length >= 250 &&
+                /Fixed Broadband Consumer Disclosure/i.test(parentText) &&
+                /Monthly Service Fee/i.test(parentText) &&
+                spec.re.test(parentText)) {
+              if (!best || parentText.length < best.length) {
+                best = {key: spec.key, text: parentText, length: parentText.length};
+              }
+              // Continue up only while looking for a potentially smaller match
+              parent = parent.parentElement;
+            } else {
+              parent = parent.parentElement;
+            }
+          }
+        }
+        if (best && !seen.has(best.key)) {
+          result.push({plan_name: best.key, text: best.text});
+          seen.add(best.key);
+        }
+      }
+      return result;
+    }
+    """
+    try:
+        return page.locator("body").evaluate(script)
+    except Exception as exc:
+        logger.warning("Could not inspect Viasat broadband-label cards: %s", exc)
+        return []
 
 
 def _extract_plans(page):
@@ -266,6 +453,10 @@ def _extract_plans(page):
         })
 
         cap = re.search(r"\b([\d,]+)\s*GB\b", block, re.I)
+        # "Unlimited" is plan-specific and must take precedence over a GB
+        # figure accidentally included by a larger ancestor/card container.
+        if re.search(r"\bUnlimited\b", block, re.I):
+            cap = None
 
         item = {
             "provider": "Viasat",
@@ -278,7 +469,9 @@ def _extract_plans(page):
             ),
             "plan_details": block[:1600],
             "source_url": page.url,
+            "broadband_label": _extract_broadband_label(block),
         }
+        item["broadband_label"]["source_url"] = page.url
 
         key = (
             name,
@@ -295,6 +488,58 @@ def _extract_plans(page):
     for candidate in candidates:
         add_plan(candidate.get("heading", ""), candidate.get("text", ""))
 
+    # The official broadband labels are separate cards below the plan cards.
+    # Extract them independently, then merge each label into its matching plan.
+    label_blocks = _extract_broadband_label_blocks(page)
+    labels_by_name = {}
+    for label_block in label_blocks:
+        label_name = re.sub(r"\s+", " ", label_block.get("plan_name", "")).strip().lower()
+        labels_by_name[label_name] = label_block.get("text", "")
+
+    for plan in plans:
+        plan_name = plan.get("plan_name", "")
+        label_text = labels_by_name.get(plan_name.lower())
+        if not label_text:
+            logger.warning(
+                "Viasat label diagnostic: url=%s title=%s headings=%s body_excerpt=%s",
+                page.url,
+                page.title(),
+                page.locator("h1, h2, h3, h4").all_inner_texts(),
+                page.locator("body").inner_text(timeout=10000)[:8000],
+            )
+            logger.warning(
+                "Viasat page: url=%s | title=%s | body_chars=%s",
+                page.url,
+                page.title(),
+                len(page.locator("body").inner_text()),
+            )
+            continue
+
+        label_data = _extract_broadband_label(label_text)
+        label_data["source_url"] = page.url
+        plan["broadband_label"] = label_data
+        plan["broadband_label_text"] = label_text[:5000]
+
+        # Use the official label values for fields that should match it.
+        if label_data.get("monthly_service_fee") is not None:
+            plan["promotional_monthly_price"] = label_data["monthly_service_fee"]
+        if label_data.get("monthly_fee_after_promo") is not None:
+            plan["regular_monthly_price"] = label_data["monthly_fee_after_promo"]
+        if label_data.get("data_included"):
+            data_value = label_data["data_included"]
+            plan["high_speed_data"] = data_value
+            if re.fullmatch(r"[\d,]+\s*GB", data_value, re.I):
+                plan["data_allowance_gb"] = int(re.search(r"[\d,]+", data_value).group().replace(",", ""))
+        if label_data.get("contract_term"):
+            plan["contract_term"] = label_data["contract_term"]
+        speeds = []
+        if label_data.get("typical_download_mbps") is not None:
+            speeds.append(label_data["typical_download_mbps"])
+        if label_data.get("typical_upload_mbps") is not None:
+            speeds.append(label_data["typical_upload_mbps"])
+        if speeds:
+            plan["advertised_speeds_mbps"] = speeds
+
     if not plans:
         logger.warning(
             "Viasat plan names appeared, but no priced cards were extracted. "
@@ -303,16 +548,26 @@ def _extract_plans(page):
             page.title(),
             body[:5000],
         )
+        # Remove duplicate plan names while preserving the first plan entry.
+    unique_plans = {}
 
+    for plan in plans:
+        name = " ".join(
+            plan.get("plan_name", "").split()
+        ).casefold()
+
+        if name and name not in unique_plans:
+            unique_plans[name] = plan
+
+    plans = list(unique_plans.values())
     return plans, body
 
 
 
 
-def _handle_cookie_consent(page):
-    """Dismiss the visible OneTrust banner before interacting with Viasat."""
 
-    sdk = page.locator("#onetrust-consent-sdk")
+def _handle_cookie_consent(page):
+    """Handle OneTrust only when its consent overlay is blocking the page."""
     backdrop = page.locator(".onetrust-pc-dark-filter")
 
     try:
@@ -321,36 +576,238 @@ def _handle_cookie_consent(page):
     except Exception:
         return
 
-    # Prefer rejecting optional cookies when an explicit option is available.
+    # Prefer an explicit reject option if the site provides one.
     reject = page.locator("#onetrust-reject-all-handler")
     try:
         if reject.is_visible(timeout=500) and reject.is_enabled():
-            reject.click(timeout=3000)
+            reject.click(timeout=2000)
+            backdrop.wait_for(state="hidden", timeout=5000)
+            return
     except Exception:
         pass
 
-    # If the backdrop remains, use the visible Close control in OneTrust.
+    # Accept cookies only if that is the available visible control.
+    accept = page.locator("#onetrust-accept-btn-handler")
     try:
-        if backdrop.is_visible(timeout=700):
-            close_button = sdk.get_by_role(
-                "button", name=re.compile(r"^Close$", re.IGNORECASE)
-            ).last
+        if accept.is_visible(timeout=500) and accept.is_enabled():
+            accept.click(timeout=2000)
+            backdrop.wait_for(state="hidden", timeout=5000)
+            return
+    except Exception:
+        pass
 
-            if close_button.is_visible(timeout=1000):
-                close_button.click(timeout=4000)
-    except Exception as exc:
-        logger.warning("Could not click OneTrust Close button: %s", exc)
-    _handle_cookie_consent(page)
-    # Never continue to the address-confirmation button while blocked.
+    # Try the known OneTrust close control without failing the lookup
+    # if the control is absent or the overlay is already gone.
+    close = page.locator(
+        "#onetrust-consent-sdk button[aria-label='Close'], "
+        "#onetrust-consent-sdk button:has-text('Close')"
+    ).last
+
     try:
-        backdrop.wait_for(state="hidden", timeout=5000)
-    except Exception as exc:
+        if close.is_visible(timeout=500) and close.is_enabled():
+            close.click(timeout=2000)
+            backdrop.wait_for(state="hidden", timeout=5000)
+            return
+    except Exception:
+        logger.warning(
+            "OneTrust overlay could not be dismissed through its visible controls."
+        )
+
+    # Do not force-click through a consent overlay. If it still blocks the
+    # page, report the issue clearly instead of continuing blindly.
+    try:
+        if backdrop.is_visible(timeout=500):
+            raise RuntimeError(
+                "Viasat cookie-consent overlay is still blocking the page. "
+                "Dismiss it in the browser or inspect the current consent controls."
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
+
+def _capture_broadband_label(page, plan_index):
+    """Open a plan's Broadband Facts control and return the actual label text.
+
+    Viasat may render the control as a custom element rather than an <a> or
+    <button>. Locate the visible text in the rendered DOM, click its nearest
+    interactive ancestor (or the text element itself), then inspect a popup,
+    dialog, or inline expansion.
+    """
+    import time
+
+    # Use DOM text rather than get_by_text() alone: the visible words can be
+    # inside nested spans and the clickable element may be a custom component.
+    controls = page.locator("body").evaluate(
+        r"""body => {
+          const matches = [];
+          for (const el of body.querySelectorAll('*')) {
+            const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+            if (text.toLowerCase() !== 'view broadband facts') continue;
+            if ([...el.children].some(c =>
+              (c.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'view broadband facts'
+            )) continue;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            let target = el;
+            while (target && target !== body &&
+                   !target.matches('a,button,[role="button"],[tabindex],summary')) {
+              target = target.parentElement;
+            }
+            matches.push({
+              element: el,
+              target: target && target !== body ? target : el,
+              tag: el.tagName,
+              targetTag: target && target !== body ? target.tagName : el.tagName
+            });
+          }
+          return matches.map((m, index) => ({index, tag:m.tag, targetTag:m.targetTag}));
+        }"""
+    )
+    if len(controls) <= plan_index:
         raise RuntimeError(
-            "Viasat's cookie-consent backdrop remains visible. "
-            "Address confirmation was not submitted."
-        ) from exc
+            f"Broadband Facts control {plan_index + 1} was not found; "
+            f"found {len(controls)} visible control(s)."
+        )
+
+    # Click through a locator for the nth visible text occurrence. The JS
+    # resolves its interactive ancestor so nested spans do not intercept it.
+    popup = None
+    before_text = page.locator("body").inner_text(timeout=10000)
+    click_result = {"clicked": False, "tag": None}
+    try:
+        with page.expect_popup(timeout=2500) as popup_info:
+            click_result = page.locator("body").evaluate(
+                r"""(body, index) => {
+                  const found = [];
+                  for (const el of body.querySelectorAll('*')) {
+                    const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+                    if (text.toLowerCase() !== 'view broadband facts') continue;
+                    if ([...el.children].some(c =>
+                      (c.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'view broadband facts'
+                    )) continue;
+                    const r = el.getBoundingClientRect();
+                    if (!r.width || !r.height) continue;
+                    let target = el;
+                    while (target && target !== body &&
+                           !target.matches('a,button,[role="button"],[tabindex],summary')) {
+                      target = target.parentElement;
+                    }
+                    found.push(target && target !== body ? target : el);
+                  }
+                  const target = found[index];
+                  if (!target) return {clicked:false, tag:null};
+                  target.click();
+                  return {clicked:true, tag:target.tagName};
+                }""",
+                plan_index,
+            )
+        popup = popup_info.value
+    except PlaywrightTimeoutError:
+        # Expected for labels rendered in a dialog or expanded inline.
+        pass
+
+    if not click_result.get("clicked"):
+        raise RuntimeError(f"Could not click Broadband Facts control {plan_index + 1}.")
+
+    target_page = popup or page
+    if popup is not None:
+        try:
+            popup.wait_for_load_state("domcontentloaded", timeout=15000)
+        except PlaywrightTimeoutError:
+            pass
+
+    # Wait for actual label content, not merely for the click to complete.
+    deadline = time.monotonic() + 12
+    label_text = ""
+    while time.monotonic() < deadline:
+        try:
+            dialogs = target_page.get_by_role("dialog")
+            if dialogs.count():
+                dialog_text = dialogs.last.inner_text(timeout=1000)
+                if re.search(r"Typical download speeds?|Fixed Broadband Consumer Disclosure", dialog_text, re.I):
+                    label_text = dialog_text
+                    break
+            body_text = target_page.locator("body").inner_text(timeout=2000)
+            if re.search(r"Typical download speeds?|Fixed Broadband Consumer Disclosure", body_text, re.I):
+                # For inline expansions, require that the rendered text changed
+                # or that the page contains the formal disclosure heading.
+                if popup is not None or body_text != before_text or re.search(
+                    r"Fixed Broadband Consumer Disclosure", body_text, re.I
+                ):
+                    label_text = body_text
+                    break
+        except Exception:
+            pass
+        target_page.wait_for_timeout(300)
+
+    if not label_text:
+        raise RuntimeError(
+            f"Clicked Broadband Facts for plan {plan_index + 1}, but no label "
+            "content appeared in a popup, dialog, or inline page section."
+        )
+
+    if popup is not None:
+        try:
+            popup.close()
+        except Exception:
+            pass
+    else:
+        # Close an in-page modal when a close control exists so the next plan's
+        # facts control remains clickable.
+        try:
+            dialogs = page.get_by_role("dialog")
+            if dialogs.count():
+                dialog = dialogs.last
+                close = dialog.locator(
+                    'button[aria-label*="close" i], button:has-text("Close"), '
+                    'button:has-text("Done"), [role="button"][aria-label*="close" i]'
+                ).first
+                if close.count() and close.is_visible(timeout=500):
+                    close.click(timeout=1500)
+                    dialog.wait_for(state="hidden", timeout=3000)
+        except Exception:
+            pass
+
+    return label_text
 
 
+
+
+def _select_label_text_for_plan(text, plan_name):
+    """When a capture contains multiple label cards, isolate the requested plan."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    # Match the full plan name so Unleashed does not accidentally match Unleashed Max.
+    names = ("Essentials", "Unleashed Max", "Unleashed")
+    heading_pattern = re.compile(
+        r"\b(?:Viasat\s+)?(Essentials|Unleashed\s+Max|Unleashed)\b",
+        re.I,
+    )
+    matches = list(heading_pattern.finditer(normalized))
+    if not matches:
+        return text
+
+    def canonical(value):
+        value = re.sub(r"\s+", " ", value).strip().lower()
+        return "unleashed max" if value == "unleashed max" else value
+
+    wanted = canonical(plan_name)
+    for index, match in enumerate(matches):
+        found = canonical(match.group(1))
+        if found != wanted:
+            continue
+        # Bound the segment at the next different plan heading. This prevents
+        # regexes from reading the first plan's fee/speeds for every plan.
+        end = len(normalized)
+        for later in matches[index + 1:]:
+            if canonical(later.group(1)) != wanted:
+                end = later.start()
+                break
+        segment = normalized[match.start():end]
+        if re.search(r"Typical download speeds?|Fixed Broadband Consumer Disclosure", segment, re.I):
+            return segment
+    return text
 
 
 def lookup_viasat(street_address, zipcode, unit=""):
@@ -424,46 +881,72 @@ def lookup_viasat(street_address, zipcode, unit=""):
                 zip_field.press("Enter", timeout=3000)
             # Viasat may show an address-confirmation dialog after Find plans.
             # Wait for the SPA to render it, choose the preselected Recommended
-            # address when available, then click the dialog's Continue button.
-            confirmation_seen = False
-            for _ in range(12):
-                try:
-                    heading = page.get_by_text(
-                        re.compile(r"Please confirm your address", re.I)
-                    ).first
-                    if heading.is_visible(timeout=500):
-                        confirmation_seen = True
-                        break
-                except Exception:
-                    pass
-                if re.search(r"/pln(?:[/?#]|$)", page.url, re.I):
-                    break
-                page.wait_for_timeout(500)
+            
+            # Wait for Viasat's address-confirmation modal.
+            confirmation_heading = page.get_by_text(
+                re.compile(r"Please confirm your address", re.I)
+            ).first
 
-            if confirmation_seen:
-                # The screenshot shows Recommended preselected; preserve that
-                # choice unless the page indicates otherwise.
-                try:
-                    recommended = page.get_by_text(
-                        re.compile(r"^Recommended$", re.I)
-                    ).first
-                    if recommended.is_visible(timeout=700):
-                        radio = page.locator("input[type='radio']").first
-                        if radio.count() and not radio.is_checked():
-                            recommended.click(timeout=2500)
-                except Exception:
-                    logger.info("Could not inspect Recommended radio; keeping site default.")
+            try:
+                confirmation_heading.wait_for(
+                    state="visible",
+                    timeout=15000,
+                )
+            except PlaywrightTimeoutError:
+                logger.warning(
+                    "Address-confirmation modal did not appear. URL=%s",
+                    page.url,
+                )
+            else:
+                # Keep the site's preselected Recommended address.
+                # Do not click "Edit my address" or select Original.
+                recommended = page.get_by_text(
+                    re.compile(r"^Recommended$", re.I)
+                ).first
 
-                continue_button = page.get_by_role(
-                    "button", name=re.compile(r"^Continue$", re.I)
-                ).last
-                continue_button.wait_for(state="visible", timeout=8000)
-                continue_button.click(timeout=8000)
+                try:
+                    recommended.wait_for(state="visible", timeout=3000)
+                    logger.info(
+                        "Viasat Recommended address is displayed; "
+                        "keeping the site-selected address."
+                    )
+                except PlaywrightTimeoutError:
+                    logger.warning(
+                        "Recommended label not found; checking the modal's "
+                        "Continue button anyway."
+                    )
+
+                # Use Viasat's specific modal button, not a generic Continue.
+                continue_button = page.locator(
+                    "button[data-testid='ConfirmServiceAddressModal-primary-action']"
+                )
+
+                continue_button.wait_for(state="visible", timeout=10000)
+                continue_button.wait_for(state="attached", timeout=3000)
+
+                if not continue_button.is_enabled():
+                    raise RuntimeError(
+                        "Viasat's address-confirmation Continue button is disabled."
+                    )
+
+                continue_button.click(timeout=10000)
+
+                # Confirm that the modal closed before waiting for plans.
+                try:
+                    confirmation_heading.wait_for(
+                        state="hidden",
+                        timeout=10000,
+                    )
+                except PlaywrightTimeoutError:
+                    logger.warning(
+                        "Confirmation modal remained visible after Continue."
+                    )
+
 
             # Wait for the actual plans route. If the site remains on /r/, log
             # page state rather than pretending that the address check completed.
             try:
-                page.wait_for_url(re.compile(r".*/pln(?:[/?#].*)?$", re.I), timeout=20000)
+                page.wait_for_url(re.compile(r".*/pln(?:[/?#].*)?$", re.I), timeout=30000)
             except PlaywrightTimeoutError:
                 page.wait_for_timeout(2500)
                 logger.warning(
@@ -479,7 +962,254 @@ def lookup_viasat(street_address, zipcode, unit=""):
 
             title = page.title()
             final_url = page.url
+
+            
+            # Diagnostic: inspect Viasat's broadband-facts controls.
+            facts_controls = page.locator("a, button").evaluate_all(
+                """els => els
+                    .filter(e => /broadband facts|broadband label/i.test(
+                        (e.innerText || e.getAttribute('aria-label') || '').trim()
+                    ))
+                    .map(e => ({
+                        tag: e.tagName,
+                        text: (e.innerText || '').trim(),
+                        href: e.getAttribute('href'),
+                        ariaLabel: e.getAttribute('aria-label'),
+                        testId: e.getAttribute('data-testid'),
+                        role: e.getAttribute('role')
+                    }))
+                """
+            )
+
+            logger.warning(
+                "Viasat broadband-facts controls: %s",
+                facts_controls,
+            )
+
+            logger.warning(
+                "Viasat table diagnostic: %s",
+                page.locator("table").evaluate_all(
+                    """els => els.map(e => ({
+                        text: (e.innerText || '').trim().slice(0, 1200),
+                        visible: !!(e.getBoundingClientRect().width &&
+                                    e.getBoundingClientRect().height)
+                    }))"""
+                ),
+            )
+            
+            
+            
+            # Inspect every element containing the broadband-facts text.
+            facts_elements = page.locator("body *").evaluate_all(
+                """els => els
+                    .filter(e => {
+                        const text = (e.innerText || '').trim();
+                        return text.length < 100 &&
+                               /broadband facts/i.test(text) &&
+                               !Array.from(e.children).some(
+                                   c => /broadband facts/i.test(
+                                       (c.innerText || '').trim()
+                                   )
+                               );
+                    })
+                    .map(e => ({
+                        tag: e.tagName,
+                        text: (e.innerText || '').trim(),
+                        role: e.getAttribute('role'),
+                        ariaLabel: e.getAttribute('aria-label'),
+                        testId: e.getAttribute('data-testid'),
+                        className: typeof e.className === 'string'
+                            ? e.className : '',
+                        href: e.getAttribute('href'),
+                        type: e.getAttribute('type')
+                    }))
+                """
+            )
+            logger.warning(
+                "Viasat facts elements: %s",
+                facts_elements
+            )
+
+            # Inspect embedded frames that may contain the labels.
+            logger.warning(
+                "Viasat frame URLs: %s",
+                [frame.url for frame in page.frames]
+            )
+
+            # Inspect links that may point to a broadband label document.
+            links = page.locator("a").evaluate_all(
+                """els => els.map(e => ({
+                    text: (e.innerText || '').trim(),
+                    href: e.href
+                })).filter(e =>
+                    /broadband|label|fact/i.test(e.text + ' ' + e.href)
+                )"""
+            )
+            logger.warning("Viasat broadband-related links: %s", links)
+
+            
+            # Inspect the rendered HTML around the broadband facts section.
+            html = page.locator("body").inner_html()
+
+            facts_index = html.lower().find("broadband facts")
+
+            logger.warning(
+                "Viasat facts HTML index: %s",
+                facts_index
+            )
+
+            if facts_index >= 0:
+                start = max(0, facts_index - 2500)
+                end = min(len(html), facts_index + 2500)
+
+                logger.warning(
+                    "Viasat facts HTML excerpt: %s",
+                    html[start:end]
+                )
+            else:
+                logger.warning(
+                    "Viasat facts text is absent from rendered HTML"
+                )
+                # Temporary diagnostic: inspect the actual rendered plan-card DOM.
+                try:
+                    page.wait_for_timeout(3000)
+                    html_diagnostic = page.evaluate("""
+                    () => {
+                        const html = document.documentElement.innerHTML;
+                        const body = document.body;
+
+                        const terms = [
+                            "Viasat Essentials",
+                            "Viasat Unleashed",
+                            "Broadband facts",
+                            "Broadband label",
+                            "View Broadband facts",
+                            "653 ms",
+                            "39.99"
+                        ];
+
+                        const results = {};
+
+                        for (const term of terms) {
+                            const index = html.toLowerCase().indexOf(term.toLowerCase());
+                            results[term] = {
+                                found: index !== -1,
+                                index: index,
+                                excerpt: index !== -1
+                                    ? html.slice(Math.max(0, index - 250), index + 700)
+                                    : ""
+                            };
+                        }
+
+                        return {
+                            bodyTextLength: body ? body.innerText.length : -1,
+                            bodyHTMLLength: body ? body.innerHTML.length : -1,
+                            documentHTMLLength: html.length,
+                            terms: results
+                        };
+                    }
+                    """)
+
+                    for term, result in html_diagnostic["terms"].items():
+                        logger.warning(
+                            "VIASAT HTML TERM %s: found=%s index=%s excerpt=%s",
+                            term,
+                            result["found"],
+                            result["index"],
+                            result["excerpt"]
+                        )
+
+                    diagnostic = page.evaluate("""
+                    () => ({
+                        url: location.href,
+                        readyState: document.readyState,
+                        bodyExists: !!document.body,
+                        bodyTextLength: document.body
+                            ? document.body.innerText.length : -1,
+                        bodyHTMLLength: document.body
+                            ? document.body.innerHTML.length : -1,
+                        htmlLength: document.documentElement
+                            ? document.documentElement.innerHTML.length : -1,
+                        bodyPreview: document.body
+                            ? document.body.innerHTML.slice(0, 800) : "",
+                        frames: [...document.querySelectorAll("iframe")].map(frame => ({
+                            title: frame.title,
+                            src: frame.src
+                        }))
+                    })
+                    """)
+
+                    logger.warning("VIASAT READY STATE: %s", diagnostic["readyState"])
+                    logger.warning("VIASAT BODY EXISTS: %s", diagnostic["bodyExists"])
+                    logger.warning("VIASAT BODY TEXT LENGTH: %s", diagnostic["bodyTextLength"])
+                    logger.warning("VIASAT BODY HTML LENGTH: %s", diagnostic["bodyHTMLLength"])
+                    logger.warning("VIASAT HTML LENGTH: %s", diagnostic["htmlLength"])
+                    logger.warning("VIASAT BODY PREVIEW: %s", diagnostic["bodyPreview"])
+                    logger.warning("VIASAT IFRAME INFO: %s", diagnostic["frames"])
+                except Exception as exc:
+                    logger.warning("VIASAT DOM DIAGNOSTIC FAILED: %s", exc)
+            # Inspect custom elements used by the page.
+            custom_elements = page.locator("*").evaluate_all(
+                """els => [...new Set(
+                    els.map(e => e.tagName.toLowerCase())
+                       .filter(name => name.includes('-'))
+                )]"""
+            )
+
+            logger.warning(
+                "Viasat custom elements: %s",
+                custom_elements
+            )
+
+            # Inspect JavaScript resources loaded by the page.
+            scripts = page.locator("script[src]").evaluate_all(
+                """els => els.map(e => e.src)"""
+            )
+
+            logger.warning(
+                "Viasat JavaScript resources: %s",
+                scripts
+            )
+            
             plans, body = _extract_plans(page)
+            if plans:
+                for index, plan in enumerate(plans):
+                    try:
+                        label_text = _capture_broadband_label(page, index)
+                        # A Viasat page may expose the full label document/body
+                        # rather than a plan-specific dialog. Never parse the
+                        # first label and reuse its values for every plan.
+                        label_text = _select_label_text_for_plan(
+                            label_text, plan["plan_name"]
+                        )
+                        plan["broadband_label"] = _extract_broadband_label(
+                            label_text
+                        )
+                        plan["broadband_label"]["source_url"] = page.url
+
+                        label = plan["broadband_label"]
+                        if (
+                            label["typical_download_mbps"] is None
+                            or label["typical_upload_mbps"] is None
+                            or label["typical_latency_ms"] is None
+                        ):
+                            logger.warning(
+                                "Incomplete Broadband Facts for %s",
+                                plan["plan_name"],
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not extract Broadband Facts for %s: %s",
+                            plan["plan_name"],
+                            exc,
+                        )
+                        plan["broadband_label"] = {
+                            "typical_download_mbps": None,
+                            "typical_upload_mbps": None,
+                            "typical_latency_ms": None,
+                            "extraction_error": str(exc),
+                            "source_url": page.url,
+                        }
             if plans:
                 status = "plans_found"
                 message = (

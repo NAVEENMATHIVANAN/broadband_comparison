@@ -42,7 +42,7 @@ function dateText(v){if(!v)return "Unknown";const d=new Date(v);return Number.is
 async function fetchJSON(url){const r=await fetch(url);if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||"Request failed.")}return r.json()}
 function place(){return $("place").value.trim()}
 function plansURL(){const p=new URLSearchParams();if(place())p.set("place",place());if($("budget").value)p.set("max_price",$("budget").value);return "/plans?"+p.toString()}
-async function loadPlans(){statusBox.textContent="";plansBody.innerHTML="<tr><td colspan='7'>Loading...</td></tr>";try{const d=await fetchJSON(plansURL());currentPlans = d.plans || [];
+async function loadPlans(){statusBox.textContent="";plansBody.innerHTML="<tr><td colspan='7'>Loading...</td></tr>";try{const d = await fetchJSON(plansURL());currentPlans = (d.plans || []).slice();
 
 const regional = d.catalogue_mode === "verified_regional_results";
 
@@ -56,7 +56,28 @@ catalogueNote.textContent = d.availability_note || (
     : "These advertised plans are not necessarily available in your area."
 );
 
-availabilityBanner.classList.toggle("regional-mode", regional);currentPlans.sort((a,b)=>$("sort").value==="speed"?(b.speed_mbps??-1)-(a.speed_mbps??-1):(a.price??Infinity)-(b.price??Infinity));const ids=new Set(currentPlans.map(p=>String(p.id)));selectedIds=new Set([...selectedIds].filter(i=>ids.has(i)));renderPlans();renderCompare();resultCount.textContent=`${currentPlans.length} plan(s) found`;if(!currentPlans.length)statusBox.textContent=place()?"No plans are verified for this place yet. Clear the place field to browse the nationwide catalogue.":"No plans are stored yet; check the scraper and database."}catch(e){currentPlans=[];renderPlans();resultCount.textContent="Unable to load plans";statusBox.textContent=e.message}}
+availabilityBanner.classList.toggle("regional-mode", regional);
+
+const sortBy = $("sort").value;
+
+currentPlans.sort((a, b) => {
+  if (sortBy === "speed") {
+    return (Number(b.speed_mbps) || 0) - (Number(a.speed_mbps) || 0);
+  }
+
+  return (Number(a.price) || Infinity) - (Number(b.price) || Infinity);
+});
+
+const ids = new Set(currentPlans.map(p => String(p.id)));
+
+selectedIds = new Set(
+  [...selectedIds].filter(id => ids.has(id))
+);
+
+renderPlans();
+renderCompare();
+
+resultCount.textContent = `${currentPlans.length} plan(s) found`;if(!currentPlans.length)statusBox.textContent=place()?"No plans are verified for this place yet. Clear the place field to browse the nationwide catalogue.":"No plans are stored yet; check the scraper and database."}catch(e){currentPlans=[];renderPlans();resultCount.textContent="Unable to load plans";statusBox.textContent=e.message}}
 function renderPlans(){if(!currentPlans.length){plansBody.innerHTML="<tr><td colspan='7'>No plans available for this search.</td></tr>";updateCompareButton();return}plansBody.replaceChildren();for(const p of currentPlans){const tr=document.createElement("tr"),sel=document.createElement("td"),cb=document.createElement("input");cb.type="checkbox";cb.checked=selectedIds.has(String(p.id));cb.setAttribute("aria-label","Select "+safe(p.plan_name));cb.addEventListener("change",()=>{const id=String(p.id);if(cb.checked&&selectedIds.size>=3){cb.checked=false;statusBox.textContent="You can compare up to three plans.";return}cb.checked?selectedIds.add(id):selectedIds.delete(id);renderCompare();updateCompareButton()});sel.append(cb);
 const provider=document.createElement("td"),strong=document.createElement("strong"),name=document.createElement("div");strong.textContent=safe(p.provider);name.className="muted small";name.textContent=safe(p.plan_name);provider.append(strong,name);
 const speed=document.createElement("td");speed.textContent=p.speed_mbps?`${p.speed_mbps} Mbps`:"Not published";const price=document.createElement("td");price.textContent=money(p.price);const offer=document.createElement("td");offer.textContent=safe(p.offer);
