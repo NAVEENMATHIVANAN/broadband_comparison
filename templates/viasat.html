@@ -4,7 +4,509 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ title }}</title><link rel="stylesheet" href="/static/style.css">
 <style>
-.wrap{max-width:1400px;margin:2rem auto;padding:0 1rem}.panel-v{background:#fff;border:1px solid #ddd;border-radius:14px;padding:1.25rem;margin:1rem 0}.form-v{display:grid;grid-template-columns:2fr 1fr;gap:1rem}.wide{grid-column:1/-1}.form-v label{display:block;font-weight:600;margin-bottom:.35rem}.form-v input{box-sizing:border-box;width:100%;padding:.8rem;border:1px solid #aaa;border-radius:8px}.actions{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}.actions button{padding:.8rem 1.1rem;border:0;border-radius:8px;cursor:pointer}.actions button:disabled{opacity:.6;cursor:wait}.muted-v{color:#666;font-size:.92rem}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}.plan{border:1px solid #ddd;border-radius:12px;padding:1rem;overflow-wrap:break-word;word-break:normal;min-width:0}.plan h3{margin-top:0}.price{font-size:1.45rem;font-weight:750;color:#132c3a}.plan .subprice{color:#555}.label-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}.label-card{border:1px solid #cbd3da;border-radius:10px;padding:1rem;overflow-wrap:break-word;word-break:normal;min-width:0}.label-card h3{margin:.1rem 0 .8rem}.label-card h4{margin:1rem 0 .4rem;border-bottom:1px solid #bbb;padding-bottom:.3rem}.label-card dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,55%);gap:.45rem .75rem;margin:.4rem 0}.label-card dt{color:#444;min-width:0;overflow-wrap:break-word;word-break:normal}.label-card dd{margin:0;text-align:right;font-weight:600;min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:normal}.label-note{font-size:.88rem;color:#555;line-height:1.45}.section-intro{color:#555}.source-link{display:inline-block;margin-top:.75rem}@media(max-width:900px){.cards,.label-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){.form-v,.cards,.label-grid{grid-template-columns:1fr}.wide{grid-column:auto}.label-card dl{grid-template-columns:1fr}.label-card dd{text-align:left}}
+
+:root {
+  --brand: #087f8c;
+  --brand-dark: #075b66;
+  --ink: #172b3a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --surface: #ffffff;
+  --page: #f3f7fa;
+  --soft: #eaf6f7;
+  --radius: 18px;
+  --shadow: 0 8px 28px rgba(23, 43, 58, .07);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  line-height: 1.6;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem clamp(1rem, 4vw, 3.5rem);
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  color: var(--ink);
+  font-weight: 800;
+  letter-spacing: -.3px;
+}
+
+.brand span {
+  color: var(--brand);
+  margin-right: .4rem;
+}
+
+.topbar a,
+main a {
+  color: var(--brand-dark);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.topbar a:hover,
+main a:hover {
+  text-decoration: underline;
+}
+
+.wrap {
+  width: min(1240px, 100%);
+  margin: 0 auto;
+  padding: 1.5rem clamp(1rem, 3vw, 2rem) 3rem;
+}
+
+.wrap > p:first-child {
+  margin: 0 0 1.2rem;
+  font-size: .92rem;
+}
+
+.panel-v {
+  margin: 1.25rem 0;
+  padding: clamp(1.2rem, 3vw, 2rem);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.panel-v h1 {
+  margin: 0 0 .5rem;
+  font-size: clamp(1.65rem, 3vw, 2.35rem);
+  line-height: 1.2;
+  letter-spacing: -1px;
+}
+
+.panel-v h2 {
+  margin-top: 0;
+  font-size: 1.45rem;
+  letter-spacing: -.4px;
+}
+
+.panel-v > p {
+  color: var(--muted);
+}
+
+.form-v {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.1rem;
+  margin-top: 1.5rem;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.form-v label {
+  display: block;
+  margin-bottom: .4rem;
+  color: var(--ink);
+  font-size: .92rem;
+  font-weight: 700;
+}
+
+.form-v input {
+  width: 100%;
+  min-height: 48px;
+  padding: .8rem .95rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.form-v input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(8, 127, 140, .13);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.actions button {
+  min-height: 48px;
+  padding: .8rem 1.35rem;
+  border: 0;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #fff;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(8, 127, 140, .18);
+  transition: background .2s, transform .2s;
+}
+
+.actions button:hover:not(:disabled) {
+  background: var(--brand-dark);
+  transform: translateY(-1px);
+}
+
+.actions button:disabled {
+  opacity: .65;
+  cursor: wait;
+}
+
+.muted-v {
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+#status {
+  padding: .85rem 1rem;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--brand-dark);
+  overflow-wrap: anywhere;
+}
+
+#meta {
+  overflow-wrap: anywhere;
+  font-size: .85rem;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+.plan {
+  min-width: 0;
+  padding: 1.4rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow-wrap: anywhere;
+  box-shadow: 0 4px 16px rgba(23, 43, 58, .045);
+  transition: transform .2s, box-shadow .2s, border-color .2s;
+}
+
+.plan:hover {
+  transform: translateY(-3px);
+  border-color: #a9d8dc;
+  box-shadow: var(--shadow);
+}
+
+.plan h3 {
+  margin: 0 0 .85rem;
+  font-size: 1.35rem;
+  letter-spacing: -.4px;
+}
+
+.plan p {
+  margin: .65rem 0;
+  font-size: .94rem;
+}
+
+.plan p strong {
+  color: var(--ink);
+}
+
+.price {
+  margin: .5rem 0 1rem !important;
+  color: var(--brand-dark);
+  font-size: 2rem !important;
+  font-weight: 850;
+  letter-spacing: -1px;
+}
+
+.subprice {
+  color: var(--muted);
+}
+
+.label-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.label-card {
+  min-width: 0;
+  padding: 1.35rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow-wrap: anywhere;
+  box-shadow: 0 4px 16px rgba(23, 43, 58, .04);
+}
+
+.label-card h3 {
+  margin: 0 0 1rem;
+  font-size: 1.2rem;
+  letter-spacing: -.3px;
+}
+
+.label-card h4 {
+  margin: 1.3rem 0 .65rem;
+  padding-bottom: .55rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--brand-dark);
+  font-size: .98rem;
+}
+
+.label-card dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: .7rem 1rem;
+  margin: .7rem 0;
+}
+
+.label-card dt {
+  color: var(--muted);
+  font-size: .88rem;
+}
+
+.label-card dd {
+  margin: 0;
+  text-align: right;
+  font-size: .9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.label-card details {
+  margin-top: 1rem;
+  padding: .85rem;
+  border-radius: 10px;
+  background: #f5f8fa;
+}
+
+.label-card summary {
+  color: var(--brand-dark);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.label-note {
+  color: var(--muted);
+  font-size: .85rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  margin-top: 1rem;
+  font-size: .9rem;
+  font-weight: 750;
+}
+
+@media (max-width: 950px) {
+  .cards,
+  .label-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wrap {
+    padding: 1rem .85rem 2rem;
+  }
+
+  .panel-v {
+    padding: 1.1rem;
+    border-radius: 14px;
+  }
+
+  .form-v,
+  .cards,
+  .label-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wide {
+    grid-column: auto;
+  }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+
+  .label-card dl {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: .65rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+
+.plan-highlights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .75rem;
+  margin: 1rem 0 1.25rem;
+}
+
+.highlight-item {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  min-width: 0;
+  padding: .85rem;
+  border: 1px solid #d7ecee;
+  border-radius: 12px;
+  background: #eff9fa;
+  overflow-wrap: anywhere;
+}
+
+.highlight-item strong {
+  color: #075b66;
+  font-size: 1.05rem;
+}
+
+.highlight-item span {
+  color: #64748b;
+  font-size: .78rem;
+}
+
+
+.label-card details {
+  margin: .75rem 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.label-card summary {
+  padding: .85rem 1rem;
+  color: var(--brand-dark);
+  font-weight: 700;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.label-card summary:hover {
+  background: var(--soft);
+}
+
+.label-card details > dl,
+.label-card details > p {
+  margin: 0;
+  padding: .75rem 1rem 1rem;
+}
+
+.label-card details > p {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.comparison-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+#comparisonTable {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+}
+
+#comparisonTable th,
+#comparisonTable td {
+  padding: .9rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+#comparisonTable th {
+  background: var(--soft);
+  color: var(--brand-dark);
+}
+
+#comparisonTable tbody tr:hover {
+  background: var(--surface);
+}
+
+#comparisonTable td {
+  overflow-wrap: anywhere;
+}
+
+#comparisonTable td:last-child {
+  min-width: 180px;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--brand-dark);
+}
+
+.loading-indicator[hidden] {
+  display: none;
+}
+
+.loading-spinner {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 3px solid var(--line);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: viasat-spin .8s linear infinite;
+}
+
+@keyframes viasat-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
 </style>
 </head>
 <body>
@@ -15,8 +517,36 @@
 <div><label for="unit">Apartment / Unit (optional)</label><input id="unit" maxlength="80" autocomplete="address-line2" placeholder="Apt, unit, suite"></div>
 <div><label for="zip">ZIP code *</label><input id="zip" required pattern="[0-9]{5}(-[0-9]{4})?" maxlength="10" autocomplete="postal-code" placeholder="e.g. 90210"></div>
 <div class="wide actions"><button id="go" type="submit">Check Viasat plans</button><span class="muted-v">Address is not saved to your catalogue.</span></div></form></section>
-<section class="panel-v" aria-live="polite"><h2>Lookup result</h2><p id="status">Enter an address to begin.</p><p id="meta" class="muted-v"></p>
-<h2 id="plans-heading" hidden>Viasat Internet Plans</h2><div id="cards" class="cards"></div>
+
+<section class="panel-v" aria-live="polite">
+<h2>Lookup result</h2>
+<p id="status" role="status" aria-live="polite">Enter an address to begin.</p>
+<div id="loadingIndicator" class="loading-indicator" hidden>
+  <span class="loading-spinner"></span>
+  <span>Checking address and retrieving available Viasat plans...</span>
+</div>
+<p id="meta" class="muted-v"></p>
+
+<h2 id="plans-heading" hidden>Viasat Internet Plans</h2>
+<section class="panel-v" id="comparisonSection" hidden>
+  <h2>Compare Viasat plans</h2>
+  <div class="comparison-scroll">
+    <table id="comparisonTable">
+      <thead>
+        <tr>
+          <th>Plan</th>
+          <th>Monthly price</th>
+          <th>Download speed</th>
+          <th>Data allowance</th>
+          <th>Contract</th>
+          <th>Plan details</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+<div id="cards" class="cards"></div>
 <section id="labels-section" hidden><h2>Broadband Consumer Labels</h2><p class="section-intro">Detailed service characteristics and fees extracted from the official labels for this address.</p><div id="labels" class="label-grid"></div></section>
 </section></main>
 <script>
@@ -28,7 +558,40 @@ function renderPlan(p,d){const c=document.createElement('article');c.className='
     p.broadband_label?.monthly_service_fee
     ?? p.promotional_monthly_price;
 
-price.textContent = money(monthlyPrice) + '/mo';c.append(price);const afterPromo =
+price.textContent = money(monthlyPrice) + '/mo';c.append(price);
+const highlights = document.createElement('div');
+highlights.className = 'plan-highlights';
+
+const speed = document.createElement('div');
+speed.className = 'highlight-item';
+
+const speedValue = document.createElement('strong');
+const advertised = p.advertised_speeds_mbps || [];
+speedValue.textContent = advertised.length
+  ? advertised[0] + ' Mbps'
+  : 'Not published';
+
+const speedLabel = document.createElement('span');
+speedLabel.textContent = 'Advertised speed';
+speed.append(speedValue, speedLabel);
+
+const data = document.createElement('div');
+data.className = 'highlight-item';
+
+const dataValue = document.createElement('strong');
+dataValue.textContent =
+  p.broadband_label?.data_included ||
+  (p.data_allowance_gb != null
+    ? p.data_allowance_gb + ' GB'
+    : 'Not published');
+
+const dataLabel = document.createElement('span');
+dataLabel.textContent = 'Data allowance';
+data.append(dataValue, dataLabel);
+
+highlights.append(speed, data);
+c.append(highlights);
+const afterPromo =
     p.broadband_label?.monthly_fee_after_promo
     ?? p.regular_monthly_price;
 
@@ -42,14 +605,177 @@ line(
         ? 'Not published'
         : `${money(afterPromo)} after ${promoMonths} months`
 );line(c,'High-speed data',p.broadband_label?.data_included|| (p.data_allowance_gb==null?'Not published':p.data_allowance_gb+' GB'));line(c,'Contract term',p.broadband_label?.contract_term);if(p.plan_details){const details=document.createElement('p');details.className='label-note';details.textContent=p.plan_details;c.append(details)}const a=document.createElement('a');a.className='source-link';a.href=p.source_url||d.source_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='View official source ↗';c.append(a);cards.append(c)}
-function renderLabel(p){const b=p.broadband_label;if(!b)return;const c=document.createElement('article');c.className='label-card';const h=document.createElement('h3');h.textContent='Viasat '+p.plan_name;c.append(h);const h4a=document.createElement('h4');h4a.textContent='Service characteristics';c.append(h4a);const dl=document.createElement('dl');addLabelRow(dl,'Monthly service fee',money(b.monthly_service_fee));addLabelRow(dl,b.monthly_fee_after_promo?'Fee after '+(b.promo_period_months||12)+' months':'Price after promotion',b.monthly_fee_after_promo?money(b.monthly_fee_after_promo):null);addLabelRow(dl,'Typical download speed',b.typical_download_mbps==null?null:b.typical_download_mbps+' Mbps');addLabelRow(dl,'Typical upload speed',b.typical_upload_mbps==null?null:b.typical_upload_mbps+' Mbps');addLabelRow(dl,'Typical latency',b.typical_latency_ms==null?null:b.typical_latency_ms+' ms');addLabelRow(dl,'Data included',b.data_included);addLabelRow(dl,'Contract term',b.contract_term);c.append(dl);const h4b=document.createElement('h4');h4b.textContent='Additional charges and terms';c.append(h4b);const fees=document.createElement('dl');
-addLabelRow(fees,'Government taxes',b.government_taxes);
-addLabelRow(fees,'Administrative cost recovery fee',b.administrative_cost_recovery_fee==null?null:'$'+b.administrative_cost_recovery_fee);
-addLabelRow(fees,'Monthly equipment lease',b.monthly_equipment_lease_fee);
-addLabelRow(fees,'Lifetime lease fee',b.lifetime_lease_fee);
-addLabelRow(fees,'Early termination fee',b.early_termination_fee);
-addLabelRow(fees,'Installation fee',b.installation_fee);
-addLabelRow(fees,'Additional data charges',b.additional_data_charges);
-c.append(fees);if(b.full_label_text){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Show full extracted label text';const text=document.createElement('p');text.className='label-note';text.textContent=b.full_label_text;details.append(summary,text);c.append(details)}const a=document.createElement('a');a.className='source-link';a.href=b.source_url||p.source_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='View official label source ↗';c.append(a);labels.append(c)}
-form.addEventListener('submit',async e=>{e.preventDefault();cards.replaceChildren();labels.replaceChildren();labelsSection.hidden=true;plansHeading.hidden=true;meta.textContent='';statusBox.textContent='Checking address with Viasat; this can take a little time.';go.disabled=true;go.textContent='Checking...';try{const res=await fetch('/api/viasat/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({street_address:document.getElementById('street').value.trim(),unit:document.getElementById('unit').value.trim(),zipcode:document.getElementById('zip').value.trim()})});const d=await res.json();if(!res.ok)throw new Error(d.detail||'Lookup failed');statusBox.textContent=d.message||'Lookup completed';meta.textContent='Status: '+d.status+' · Checked: '+(d.checked_at||'unknown');if(d.plans?.length){plansHeading.hidden=false;d.plans.forEach(p=>renderPlan(p,d));d.plans.forEach(renderLabel);labelsSection.hidden=labels.children.length===0}else{const p=document.createElement('p');p.className='muted-v';p.textContent='No address-specific plan cards were extracted. This does not prove service is unavailable. Check the official result page or try later.';cards.append(p)}if(d.source_url){const a=document.createElement('a');a.href=d.source_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Open Viasat result page ↗';meta.append(document.createTextNode(' · '),a)}}catch(err){statusBox.textContent=err.message}finally{go.disabled=false;go.textContent='Check Viasat plans'}});
+
+
+function renderComparison(plans) {
+  const section = document.getElementById('comparisonSection');
+  const tbody = document.querySelector('#comparisonTable tbody');
+
+  tbody.replaceChildren();
+
+  plans.forEach(p => {
+    const row = document.createElement('tr');
+
+    const price =
+      p.broadband_label?.monthly_service_fee ??
+      p.promotional_monthly_price;
+
+    const speeds = p.advertised_speeds_mbps || [];
+
+    const speed = speeds.length
+      ? speeds[0] + ' Mbps'
+      : p.broadband_label?.typical_download_mbps != null
+        ? p.broadband_label.typical_download_mbps + ' Mbps'
+        : 'Not published';
+
+    const data =
+      p.broadband_label?.data_included ||
+      (p.data_allowance_gb != null
+        ? p.data_allowance_gb + ' GB'
+        : 'Not published');
+
+    const contract =
+      p.broadband_label?.contract_term || 'Not published';
+
+    [
+  p.plan_name || 'Unnamed plan',
+  price == null ? 'Not published' : money(price) + '/mo',
+  speed,
+  data,
+  contract,
+  p.plan_details || 'See plan details below'
+].forEach(value => {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.append(cell);
+    });
+
+    tbody.append(row);
+  });
+
+  section.hidden = plans.length === 0;
+}
+
+function renderLabel(p) {
+  const b = p.broadband_label;
+  if (!b) return;
+
+  const c = document.createElement('article');
+  c.className = 'label-card';
+
+  const h = document.createElement('h3');
+  h.textContent = 'Viasat ' + p.plan_name;
+  c.append(h);
+
+  // Collapsible service characteristics
+  const serviceDetails = document.createElement('details');
+  serviceDetails.open = true;
+
+  const serviceSummary = document.createElement('summary');
+  serviceSummary.textContent = 'Service characteristics';
+
+  const dl = document.createElement('dl');
+
+  addLabelRow(dl, 'Monthly service fee', money(b.monthly_service_fee));
+
+  addLabelRow(
+    dl,
+    b.monthly_fee_after_promo
+      ? 'Fee after ' + (b.promo_period_months || 12) + ' months'
+      : 'Price after promotion',
+    b.monthly_fee_after_promo
+      ? money(b.monthly_fee_after_promo)
+      : null
+  );
+
+  addLabelRow(
+    dl,
+    'Typical download speed',
+    b.typical_download_mbps == null
+      ? null
+      : b.typical_download_mbps + ' Mbps'
+  );
+
+  addLabelRow(
+    dl,
+    'Typical upload speed',
+    b.typical_upload_mbps == null
+      ? null
+      : b.typical_upload_mbps + ' Mbps'
+  );
+
+  addLabelRow(
+    dl,
+    'Typical latency',
+    b.typical_latency_ms == null
+      ? null
+      : b.typical_latency_ms + ' ms'
+  );
+
+  addLabelRow(dl, 'Data included', b.data_included);
+  addLabelRow(dl, 'Contract term', b.contract_term);
+
+  serviceDetails.append(serviceSummary, dl);
+  c.append(serviceDetails);
+
+  // Collapsible additional charges and terms
+  const feeDetails = document.createElement('details');
+
+  const feeSummary = document.createElement('summary');
+  feeSummary.textContent = 'Additional charges and terms';
+
+  const fees = document.createElement('dl');
+
+  addLabelRow(fees, 'Government taxes', b.government_taxes);
+
+  addLabelRow(
+    fees,
+    'Administrative cost recovery fee',
+    b.administrative_cost_recovery_fee == null
+      ? null
+      : '$' + b.administrative_cost_recovery_fee
+  );
+
+  addLabelRow(
+    fees,
+    'Monthly equipment lease',
+    b.monthly_equipment_lease_fee
+  );
+
+  addLabelRow(fees, 'Lifetime lease fee', b.lifetime_lease_fee);
+  addLabelRow(fees, 'Early termination fee', b.early_termination_fee);
+  addLabelRow(fees, 'Installation fee', b.installation_fee);
+  addLabelRow(fees, 'Additional data charges', b.additional_data_charges);
+
+  feeDetails.append(feeSummary, fees);
+  c.append(feeDetails);
+
+  // Full extracted label text
+  if (b.full_label_text) {
+    const fullDetails = document.createElement('details');
+
+    const summary = document.createElement('summary');
+    summary.textContent = 'Show full extracted label text';
+
+    const text = document.createElement('p');
+    text.className = 'label-note';
+    text.textContent = b.full_label_text;
+
+    fullDetails.append(summary, text);
+    c.append(fullDetails);
+  }
+
+  // Official source link
+  const a = document.createElement('a');
+  a.className = 'source-link';
+  a.href = b.source_url || p.source_url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = 'View official label source ↗';
+
+  c.append(a);
+  labels.append(c);
+}
+
+form.addEventListener('submit',async e=>{e.preventDefault();if(go.disabled)return;const loadingIndicator=document.getElementById('loadingIndicator');loadingIndicator.hidden=false;cards.replaceChildren();labels.replaceChildren();document.getElementById('comparisonSection').hidden=true;labelsSection.hidden=true;plansHeading.hidden=true;meta.textContent='';statusBox.textContent='Checking address with Viasat; this can take a little time.';go.disabled=true;go.textContent='Checking...';try{const res=await fetch('/api/viasat/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({street_address:document.getElementById('street').value.trim(),unit:document.getElementById('unit').value.trim(),zipcode:document.getElementById('zip').value.trim()})});const d=await res.json();if(!res.ok)throw new Error(d.detail||'Lookup failed');statusBox.textContent=d.message||'Lookup completed';meta.textContent='Status: '+d.status+' · Checked: '+(d.checked_at||'unknown');if(d.plans?.length){plansHeading.hidden=false;renderComparison(d.plans);d.plans.forEach(p=>renderPlan(p,d));d.plans.forEach(renderLabel);labelsSection.hidden=labels.children.length===0}else{const p=document.createElement('p');p.className='muted-v';p.textContent='No address-specific plan cards were extracted. This does not prove service is unavailable. Check the official result page or try later.';cards.append(p)}if(d.source_url){const a=document.createElement('a');a.href=d.source_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Open Viasat result page ↗';meta.append(document.createTextNode(' · '),a)}}catch(err){statusBox.textContent=err.message}finally{go.disabled=false;go.textContent='Check Viasat plans';loadingIndicator.hidden=true}});
 </script></body></html>
